@@ -1,0 +1,770 @@
+---
+alwaysApply: true
+---
+
+# Процесс работы с GitHub между dev и prod серверами
+
+## 📚 Основные репозитории
+
+### 1. `civilx.univers` (Основной репозиторий)
+
+**URL**: https://github.com/F1bonacci66/civilx.univers
+
+**Назначение**: 
+- Основной репозиторий с последней стабильной версией сайта
+- Хранит версию, которая дошла до пользователей
+- Используется для откатов в случае проблем
+
+**Когда обновляется**:
+- После успешного тестирования на prod сервере
+- Только проверенные и стабильные версии
+
+**Важно**: Это репозиторий для откатов - если что-то пошло не так на prod, можно откатиться к последней версии из этого репозитория.
+
+---
+
+### 2. `civilxuniverse.dev` (Репозиторий prod версии)
+
+**URL**: https://github.com/F1bonacci66/civilxuniverse.dev
+
+**Назначение**:
+- Репозиторий для работы с production сервером
+- Сохранение актуальной версии с prod сервера
+- История изменений на prod сервере
+
+**Когда обновляется**:
+- При работе с prod сервером
+- После изменений на prod сервере (если делались прямые правки)
+
+**Использование**:
+- Резервное копирование версии с prod сервера
+- Отслеживание изменений на prod
+
+---
+
+### 3. `civilxuniverse.synch` (Репозиторий синхронизации)
+
+**URL**: https://github.com/F1bonacci66/civilxuniverse.synch
+
+**Назначение**:
+- Репозиторий для синхронизации между dev и prod серверами
+- Промежуточное хранилище для передачи обновлений
+
+**Как работает**:
+- Dev сервер пушит изменения в этот репозиторий
+- Prod сервер пуллит изменения из этого репозитория
+- Служит "мостом" между dev и prod
+
+**Важно**: Это основной репозиторий для передачи обновлений от dev к prod.
+
+---
+
+## 🔄 Процесс выпуска обновлений
+
+### Шаг 1: Разработка на dev сервере (79.174.77.29)
+
+```bash
+# Подключиться к dev серверу
+ssh root@79.174.77.29
+
+# Перейти в директорию проекта
+cd /opt/civilx-universe-dev
+
+# ВАЖНО: При первом клонировании или после git pull проверить .env файлы
+# Frontend
+cd universe/universe
+if [ -f init-dev-env.sh ]; then
+    chmod +x init-dev-env.sh
+    ./init-dev-env.sh
+fi
+cd ../..
+
+# Внести изменения в код
+# ... редактирование файлов ...
+
+# Проверить изменения
+git status
+
+# Добавить изменения
+git add .
+
+# Создать коммит
+git commit -m "feat: описание изменений"
+
+# Проверить, что remote настроен
+git remote -v
+# Должен быть:
+# origin  https://github.com/F1bonacci66/civilxuniverse.synch.git
+# synch   https://github.com/F1bonacci66/civilxuniverse.synch.git
+```
+
+**Если remote не настроен**:
+```bash
+# Инициализировать git (если еще не инициализирован)
+git init
+
+# Добавить remote для синхронизации
+git remote add origin https://github.com/F1bonacci66/civilxuniverse.synch.git
+git remote add synch https://github.com/F1bonacci66/civilxuniverse.synch.git
+
+# Настроить ветку
+git branch -M main
+```
+
+---
+
+### Шаг 2: Отправка изменений в репозиторий синхронизации
+
+```bash
+# На dev сервере
+cd /opt/civilx-universe-dev
+
+# Отправить изменения в synch репозиторий
+git push synch main
+
+# Или если используете origin
+git push origin main
+```
+
+**Если требуется авторизация**:
+```bash
+# Использовать GitHub токен
+git push https://ghp_YOUR_TOKEN@github.com/F1bonacci66/civilxuniverse.synch.git main
+```
+
+---
+
+### Шаг 3: Получение обновлений на prod сервере (95.163.230.61)
+
+```bash
+# Подключиться к prod серверу
+ssh root@95.163.230.61
+
+# Перейти в директорию проекта
+cd /opt/civilx-universe
+
+# Проверить текущий статус
+git status
+
+# Проверить, что remote настроен
+git remote -v
+# Должен быть:
+# synch   https://github.com/F1bonacci66/civilxuniverse.synch.git
+
+# Получить последние изменения
+git pull synch main
+
+# Если есть конфликты, разрешить их
+# git merge synch/main
+# или
+# git rebase synch/main
+
+# ВАЖНО: После git pull проверить и инициализировать .env файлы
+# Frontend
+cd /opt/civilx-universe/universe/universe
+if [ -f init-prod-env.sh ]; then
+    chmod +x init-prod-env.sh
+    ./init-prod-env.sh
+else
+    echo "⚠️  Скрипт init-prod-env.sh не найден, создайте .env вручную"
+fi
+
+# Backend (если нужно)
+cd /opt/civilx-backend
+if [ ! -f .env ]; then
+    echo "⚠️  Backend .env не найден! Создайте его вручную."
+fi
+```
+
+**Если remote не настроен**:
+```bash
+# Добавить remote для синхронизации
+git remote add synch https://github.com/F1bonacci66/civilxuniverse.synch.git
+
+# Получить изменения
+git pull synch main
+```
+
+---
+
+### Шаг 4: Применение изменений на prod сервере
+
+```bash
+# На prod сервере после git pull
+
+# ВАЖНО: Проверить .env файлы (они НЕ коммитятся в Git)
+# Если .env файлы отсутствуют, создать их из шаблонов
+
+# Проверить Backend .env
+cd /opt/civilx-backend
+if [ ! -f .env ]; then
+    echo "⚠️  Backend .env не найден! Создайте его вручную."
+    echo "См. раздел 'Настройка переменных окружения' ниже"
+fi
+
+# Проверить Frontend .env (используем скрипт инициализации)
+cd /opt/civilx-universe/universe/universe
+if [ ! -f .env ]; then
+    if [ -f init-prod-env.sh ]; then
+        echo "Запускаю скрипт инициализации .env..."
+        chmod +x init-prod-env.sh
+        echo "y" | ./init-prod-env.sh
+    else
+        echo "⚠️  Frontend .env не найден и скрипт init-prod-env.sh недоступен!"
+        echo "Создайте .env вручную. См. раздел 'Настройка переменных окружения' ниже"
+    fi
+fi
+
+# Для Backend (если изменился код)
+cd /opt/civilx-backend
+docker-compose restart
+
+# Или пересоздать контейнер
+docker-compose down
+docker-compose up -d --build
+
+# Для Frontend (если изменился код)
+cd /opt/civilx-universe
+docker-compose restart
+
+# Или пересоздать контейнер
+docker-compose down
+docker-compose up -d --build
+```
+
+---
+
+### Шаг 5: Тестирование на prod сервере
+
+```bash
+# Проверить статус контейнеров
+docker ps
+
+# Проверить логи
+docker logs civilx-backend_backend_1 --tail 50
+docker logs civilx-universe --tail 50
+
+# Проверить API
+curl http://localhost:8000/api/datalab/health/
+
+# Проверить Frontend
+curl http://localhost:3001
+```
+
+**Если все работает корректно** → переходим к шагу 6  
+**Если есть проблемы** → откатываемся (см. раздел "Откат изменений")
+
+---
+
+### Шаг 6: Сохранение в основной репозиторий (после успешного тестирования)
+
+```bash
+# На prod сервере после успешного тестирования
+cd /opt/civilx-universe
+
+# Проверить, что remote для основного репозитория настроен
+git remote -v
+# Должен быть:
+# main-repo  https://github.com/F1bonacci66/civilx.univers.git
+
+# Если не настроен, добавить
+git remote add main-repo https://github.com/F1bonacci66/civilx.univers.git
+
+# Отправить в основной репозиторий
+git push main-repo main
+```
+
+**Важно**: В основной репозиторий (`civilx.univers`) отправляются только проверенные и стабильные версии!
+
+---
+
+## ⚙️ Настройка переменных окружения (.env файлы)
+
+**КРИТИЧЕСКИ ВАЖНО**: `.env` файлы **НЕ коммитятся** в Git (защищены `.gitignore`). После `git pull` на prod сервере необходимо убедиться, что `.env` файлы существуют и настроены правильно.
+
+### Защита .env файлов
+
+На dev сервере настроены `.gitignore` файлы:
+- `/opt/civilx-universe-dev/backend/.gitignore` - исключает `.env`, `.env.local`, логи
+- `/opt/civilx-universe-dev/universe/.gitignore` - исключает `.env*.local`, логи
+
+**Важно**: `.env` файлы никогда не должны попадать в Git репозиторий!
+
+### Шаблоны .env файлов
+
+Для документации созданы шаблоны:
+- `/opt/civilx-universe-dev/backend/.env.example` - шаблон для backend
+- `/opt/civilx-universe-dev/universe/.env.local.example` - шаблон для frontend
+
+### Различия между dev и prod окружениями
+
+#### Backend .env
+
+**Dev сервер (79.174.77.29)**:
+```env
+# Прямое подключение к БД на prod сервере
+DATABASE_URL=postgresql://datalab_read:StrongTempPass123!@95.163.230.61:5432/civilx_universe
+RVT_CONVERTER_API_URL=http://176.98.178.75:8001
+JWT_SECRET=your_super_secret_jwt_key_for_php
+```
+
+**Prod сервер (95.163.230.61)**:
+```env
+# Подключение через Docker (host.docker.internal)
+DATABASE_URL=postgresql://datalab_read:StrongTempPass123!@host.docker.internal:5432/civilx_universe
+RVT_CONVERTER_API_URL=http://176.98.178.75:8001
+JWT_SECRET=your_super_secret_jwt_key_for_php
+```
+
+**Различие**: Dev использует прямой IP (`95.163.230.61:5432`), prod использует Docker host (`host.docker.internal:5432`).
+
+#### Frontend .env
+
+**Dev сервер (79.174.77.29)**:
+```env
+NEXT_PUBLIC_API_URL=/api/datalab
+INTERNAL_API_URL=http://172.17.0.1:8000/api/datalab
+DOCKER_CONTAINER=true
+NODE_ENV=development
+PORT=3001
+HOSTNAME=0.0.0.0
+```
+
+**Prod сервер (95.163.230.61)**:
+```env
+NEXT_PUBLIC_API_URL=/api/datalab
+INTERNAL_API_URL=http://172.17.0.1:8000/api/datalab
+DOCKER_CONTAINER=true
+NODE_ENV=production
+PORT=3001
+HOSTNAME=0.0.0.0
+```
+
+**Различия**:
+- `NODE_ENV`: Dev = `development`, prod = `production`
+- Оба используют `INTERNAL_API_URL=http://172.17.0.1:8000/api/datalab` (Docker bridge для доступа к backend на хосте)
+- Оба используют `NEXT_PUBLIC_API_URL=/api/datalab` (относительный путь для работы с любого компьютера)
+
+### Автоматическая инициализация .env файлов после git pull
+
+**РЕКОМЕНДУЕТСЯ**: Использовать скрипты инициализации для автоматического создания правильных `.env` файлов.
+
+#### Frontend - Dev сервер
+
+После `git pull` на dev сервере:
+
+```bash
+cd /opt/civilx-universe-dev/universe/universe
+
+# Запустить скрипт инициализации
+./init-dev-env.sh
+
+# Скрипт создаст .env файл с правильными настройками для dev
+# Если .env уже существует, скрипт спросит разрешение на перезапись
+```
+
+#### Frontend - Prod сервер
+
+После `git pull` на prod сервере:
+
+```bash
+cd /opt/civilx-universe/universe/universe
+
+# Запустить скрипт инициализации
+./init-prod-env.sh
+
+# Скрипт создаст .env файл с правильными настройками для prod
+# Если .env уже существует, скрипт спросит разрешение на перезапись
+```
+
+#### Ручное создание .env файлов (если скрипты недоступны)
+
+**Backend - Dev сервер**:
+```bash
+cd /opt/civilx-backend-dev
+if [ ! -f .env ]; then
+    cat > .env << 'EOF'
+DATABASE_URL=postgresql://datalab_read:StrongTempPass123!@95.163.230.61:5432/civilx_universe
+RVT_CONVERTER_API_URL=http://176.98.178.75:8001
+JWT_SECRET=your_super_secret_jwt_key_for_php
+EOF
+    echo "✅ Backend .env создан"
+fi
+```
+
+**Backend - Prod сервер**:
+```bash
+cd /opt/civilx-backend
+if [ ! -f .env ]; then
+    cat > .env << 'EOF'
+DATABASE_URL=postgresql://datalab_read:StrongTempPass123!@host.docker.internal:5432/civilx_universe
+RVT_CONVERTER_API_URL=http://176.98.178.75:8001
+JWT_SECRET=your_super_secret_jwt_key_for_php
+EOF
+    echo "✅ Backend .env создан"
+fi
+```
+
+**Frontend - Dev сервер** (если скрипт недоступен):
+```bash
+cd /opt/civilx-universe-dev/universe/universe
+if [ ! -f .env ]; then
+    cat > .env << 'EOF'
+NEXT_PUBLIC_API_URL=/api/datalab
+INTERNAL_API_URL=http://172.17.0.1:8000/api/datalab
+DOCKER_CONTAINER=true
+NODE_ENV=development
+PORT=3001
+HOSTNAME=0.0.0.0
+EOF
+    echo "✅ Frontend .env создан"
+fi
+```
+
+**Frontend - Prod сервер** (если скрипт недоступен):
+```bash
+cd /opt/civilx-universe/universe/universe
+if [ ! -f .env ]; then
+    cat > .env << 'EOF'
+NEXT_PUBLIC_API_URL=/api/datalab
+INTERNAL_API_URL=http://172.17.0.1:8000/api/datalab
+DOCKER_CONTAINER=true
+NODE_ENV=production
+PORT=3001
+HOSTNAME=0.0.0.0
+EOF
+    echo "✅ Frontend .env создан"
+fi
+```
+
+### Проверка .env файлов после git pull
+
+**Рекомендуется** всегда проверять `.env` файлы после `git pull`:
+
+```bash
+# На prod сервере после git pull
+cd /opt/civilx-backend
+echo "=== Backend .env ==="
+if [ -f .env ]; then
+    cat .env | grep -v 'PASSWORD\|SECRET' | head -5
+else
+    echo "❌ .env НЕ НАЙДЕН! Создайте его вручную."
+fi
+
+cd /opt/civilx-universe/universe/universe
+echo "=== Frontend .env ==="
+if [ -f .env ]; then
+    cat .env | grep -v 'PASSWORD\|SECRET'
+else
+    echo "❌ .env НЕ НАЙДЕН! Запустите: ./init-prod-env.sh"
+fi
+```
+
+---
+
+## 🔙 Откат изменений
+
+### Откат на prod сервере
+
+Если после обновления что-то пошло не так:
+
+```bash
+# На prod сервере
+cd /opt/civilx-universe
+
+# Посмотреть историю коммитов
+git log --oneline -10
+
+# Откатиться к предыдущему коммиту
+git reset --hard HEAD~1
+
+# Или откатиться к конкретному коммиту
+git reset --hard <commit-hash>
+
+# Перезапустить сервисы
+cd /opt/civilx-backend && docker-compose restart
+cd /opt/civilx-universe && docker-compose restart
+```
+
+### Откат из основного репозитория
+
+Если нужно откатиться к последней стабильной версии:
+
+```bash
+# На prod сервере
+cd /opt/civilx-universe
+
+# Получить последнюю стабильную версию из основного репозитория
+git fetch main-repo
+git reset --hard main-repo/main
+
+# Перезапустить сервисы
+cd /opt/civilx-backend && docker-compose restart
+cd /opt/civilx-universe && docker-compose restart
+```
+
+---
+
+## 📋 Чек-лист процесса обновления
+
+### Перед отправкой на prod:
+
+- [ ] Изменения протестированы на dev сервере
+- [ ] **Проверены/инициализированы .env файлы на dev** (если были изменения в docker-compose):
+  - [ ] Frontend: запущен `./init-dev-env.sh` или проверен `.env`
+- [ ] Код закоммичен с понятным сообщением
+- [ ] Изменения отправлены в `civilxuniverse.synch`
+- [ ] Проверено, что нет конфликтов
+
+### На prod сервере:
+
+- [ ] Получены изменения из `civilxuniverse.synch`
+- [ ] Конфликты разрешены (если были)
+- [ ] **Проверены/инициализированы .env файлы**:
+  - [ ] Frontend: запущен `./init-prod-env.sh` или создан `.env` вручную
+  - [ ] Backend: проверен `.env` файл (создан вручную, если отсутствует)
+- [ ] Сервисы перезапущены
+- [ ] Проверена работа Backend API
+- [ ] Проверена работа Frontend
+- [ ] Проверены логи на ошибки
+
+### После успешного тестирования:
+
+- [ ] Изменения отправлены в `civilx.univers` (основной репозиторий)
+- [ ] Документация обновлена (если нужно)
+
+---
+
+## 🔧 Настройка Git на серверах
+
+### На dev сервере (79.174.77.29)
+
+```bash
+# Настроить Git пользователя
+git config --global user.name "CivilX Dev Server"
+git config --global user.email "dev@civilx.ru"
+
+# Настроить remote репозитории
+cd /opt/civilx-universe-dev
+git remote add origin https://github.com/F1bonacci66/civilxuniverse.synch.git
+git remote add synch https://github.com/F1bonacci66/civilxuniverse.synch.git
+
+# Установить ветку по умолчанию
+git branch -M main
+```
+
+### На prod сервере (95.163.230.61)
+
+```bash
+# Настроить Git пользователя
+git config --global user.name "CivilX Prod Server"
+git config --global user.email "prod@civilx.ru"
+
+# Настроить remote репозитории
+cd /opt/civilx-universe
+git remote add synch https://github.com/F1bonacci66/civilxuniverse.synch.git
+git remote add main-repo https://github.com/F1bonacci66/civilx.univers.git
+
+# Установить ветку по умолчанию
+git branch -M main
+```
+
+---
+
+## 🔐 Авторизация в GitHub
+
+### Использование GitHub токена
+
+Если требуется авторизация при push/pull:
+
+```bash
+# Использовать токен в URL
+git push https://ghp_YOUR_TOKEN@github.com/F1bonacci66/civilxuniverse.synch.git main
+
+# Или настроить credential helper
+git config --global credential.helper store
+echo "https://ghp_YOUR_TOKEN@github.com" > ~/.git-credentials
+```
+
+**GitHub токен**: `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`
+
+---
+
+## 📊 Схема работы репозиториев
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Процесс обновления                        │
+└─────────────────────────────────────────────────────────────┘
+
+1. Разработка на dev сервере
+   └─> git commit
+       └─> git push synch main
+           └─> civilxuniverse.synch (репозиторий синхронизации)
+
+2. Получение на prod сервере
+   └─> git pull synch main
+       └─> Тестирование на prod
+           ├─> ✅ Успешно → git push main-repo main
+           │   └─> civilx.univers (основной репозиторий)
+           │
+           └─> ❌ Ошибка → Откат изменений
+
+3. Резервное копирование prod
+   └─> git push prod-repo main
+       └─> civilxuniverse.dev (репозиторий prod версии)
+```
+
+---
+
+## ⚠️ Важные замечания
+
+1. **Всегда тестируйте на dev перед отправкой на prod**
+2. **Используйте понятные сообщения коммитов** (см. Conventional Commits)
+3. **Не отправляйте в `civilx.univers` непроверенные версии**
+4. **Делайте резервные копии перед обновлением prod**
+5. **Проверяйте логи после обновления**
+6. **Имейте план отката на случай проблем**
+7. **⚠️ КРИТИЧЕСКИ ВАЖНО: .env файлы НЕ коммитятся в Git** - они защищены `.gitignore`. После `git pull` на prod всегда проверяйте, что `.env` файлы существуют и настроены правильно (см. раздел "Настройка переменных окружения")
+8. **Различия в .env между dev и prod**: Dev использует прямые IP адреса, prod использует Docker hostnames (`host.docker.internal`, `172.17.0.1`)
+
+---
+
+## 🆘 Решение проблем
+
+### Проблема: Конфликты при git pull
+
+```bash
+# Посмотреть конфликты
+git status
+
+# Разрешить конфликты вручную
+# Отредактировать файлы с конфликтами
+# Затем:
+git add .
+git commit -m "fix: разрешены конфликты"
+```
+
+### Проблема: Не могу отправить изменения
+
+```bash
+# Проверить права доступа
+git remote -v
+
+# Проверить авторизацию
+git push synch main
+
+# Если требуется токен, использовать:
+git push https://ghp_TOKEN@github.com/F1bonacci66/civilxuniverse.synch.git main
+```
+
+### Проблема: Сервисы не запускаются после обновления
+
+```bash
+# Проверить логи
+docker logs civilx-backend_backend_1 --tail 100
+docker logs civilx-universe --tail 100
+
+# Проверить .env файлы (частая причина проблем)
+cd /opt/civilx-backend
+if [ ! -f .env ]; then
+    echo "❌ Backend .env отсутствует! Создайте его."
+fi
+
+cd /opt/civilx-universe/universe
+if [ ! -f .env.local ]; then
+    echo "❌ Frontend .env.local отсутствует! Создайте его."
+fi
+
+# Откатиться к предыдущей версии
+git reset --hard HEAD~1
+docker-compose restart
+```
+
+### Проблема: Ошибки подключения к БД после git pull
+
+```bash
+# Проверить .env файл backend
+cd /opt/civilx-backend
+cat .env | grep DATABASE_URL
+
+# Убедиться, что используется правильный формат для prod:
+# DATABASE_URL=postgresql://datalab_read:StrongTempPass123!@host.docker.internal:5432/civilx_universe
+# (НЕ 95.163.230.61:5432 для prod!)
+
+# Если неправильно, исправить:
+nano .env
+# Изменить DATABASE_URL на host.docker.internal:5432
+
+# Перезапустить backend
+docker-compose restart
+```
+
+### Проблема: Frontend не может подключиться к API
+
+```bash
+# Проверить .env.local файл frontend
+cd /opt/civilx-universe/universe
+cat .env.local
+
+# Убедиться, что настроено правильно для prod:
+# NEXT_PUBLIC_API_URL=/api/datalab
+# INTERNAL_API_URL=http://172.17.0.1:8000/api/datalab
+# DOCKER_CONTAINER=true
+
+# Если неправильно, исправить:
+nano .env.local
+# Установить DOCKER_CONTAINER=true и INTERNAL_API_URL=http://172.17.0.1:8000/api/datalab
+
+# Перезапустить frontend
+cd /opt/civilx-universe
+docker-compose restart
+```
+
+---
+
+## 📝 Примеры коммитов
+
+### Правильные сообщения коммитов:
+
+```bash
+git commit -m "feat: добавлена функция экспорта в Excel"
+git commit -m "fix: исправлена ошибка при загрузке файлов"
+git commit -m "refactor: оптимизирован код обработки данных"
+git commit -m "docs: обновлена документация API"
+```
+
+### Неправильные сообщения:
+
+```bash
+# ❌ Плохо
+git commit -m "изменения"
+git commit -m "fix"
+git commit -m "обновление"
+
+# ✅ Хорошо
+git commit -m "feat: добавлена поддержка фильтрации по дате"
+git commit -m "fix: исправлена ошибка 500 при загрузке больших файлов"
+```
+
+---
+
+## 🔗 Полезные ссылки
+
+- **civilx.univers**: https://github.com/F1bonacci66/civilx.univers
+- **civilxuniverse.dev**: https://github.com/F1bonacci66/civilxuniverse.dev
+- **civilxuniverse.synch**: https://github.com/F1bonacci66/civilxuniverse.synch
+
+---
+
+**Дата создания**: 2024-12-03  
+**Дата обновления**: 2024-12-03  
+**Версия**: 1.1  
+**Применимо к**: Dev сервер (79.174.77.29) и Prod сервер (95.163.230.61)
+
+**Изменения в v1.1**:
+- Добавлен раздел "Настройка переменных окружения (.env файлы)"
+- Добавлена информация о различиях между dev и prod окружениями
+- Добавлены инструкции по проверке и созданию .env файлов после git pull
+- Обновлен чек-лист процесса обновления
+- Добавлены решения проблем с .env файлами
