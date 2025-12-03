@@ -1,0 +1,132 @@
+---
+alwaysApply: true
+---
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Docker & Container Architecture Standards
+
+**Description**: Comprehensive Docker containerization and microservice architecture standards following modern best practices. Essential for all containerized development and deployment.
+
+**Key Focus Areas**: Multi-stage builds, container optimization, service communication, networking, orchestration, development workflows
+
+## Docker Build Standards
+
+### Multi-Stage Builds
+- **Always Use Multi-Stage**: Use multi-stage builds for all production containers
+- **Build Optimization**: Separate build dependencies from runtime dependencies
+- **Layer Caching**: Optimize layer order for maximum caching efficiency
+- **Base Image Selection**: Use official, minimal base images (alpine, distroless, scratch when possible)
+- **Security Scanning**: Regularly scan images for vulnerabilities
+
+### Container Optimization
+- **Minimize Layers**: Combine RUN commands where logical
+- **Remove Unnecessary Files**: Clean up package managers and temporary files
+- **Use .dockerignore**: Exclude unnecessary files from build context
+- **Non-Root Users**: Always run containers as non-root users
+- **Resource Limits**: Define appropriate CPU and memory limits
+
+## Service Communication & Networking
+
+### Internal Communication (CRITICAL)
+- **Service Names**: Use Docker Compose service names for internal communication
+- **Internal Ports**: Always use internal container ports for service-to-service communication
+- **Service Discovery**: Rely on Docker's built-in DNS resolution
+- **Health Checks**: Implement and use health checks for service readiness
+
+### Network Configuration
+- **Custom Networks**: Create custom networks for service isolation
+- **Network Segmentation**: Separate frontend, backend, and data networks where appropriate
+- **DNS Resolution**: Use service names instead of IP addresses
+- **External Network**: Make networks external for cross-compose communication
+
+## Docker Compose Orchestration
+
+### Service Definition Standards
+- **Health Checks**: Define health checks for all services
+- **Restart Policies**: Use appropriate restart policies (unless-stopped, on-failure)
+- **Environment Variables**: Use .env files and environment variable substitution
+- **Volumes**: Use named volumes for data persistence
+- **Dependencies**: Define service dependencies with depends_on and conditions
+
+### Development vs Production
+- **Override Files**: Use docker-compose.override.yml for development-specific settings
+- **Environment Separation**: Maintain separate configurations for different environments
+- **Secret Management**: Use Docker secrets or external secret management in production
+
+## Container Lifecycle Management
+
+### Health Checks & Monitoring
+- **Implement Health Endpoints**: All services must have health check endpoints
+- **Define Health Check Commands**: Use HEALTHCHECK instruction in Dockerfiles
+- **Monitor Container Status**: Track container health in orchestration
+
+### Graceful Shutdown
+- **Signal Handling**: Handle SIGTERM and SIGINT signals properly
+- **Connection Cleanup**: Close database and external connections gracefully
+- **Request Completion**: Allow in-flight requests to complete before shutdown
+
+### Resource Management
+- **Define Limits**: Set CPU and memory limits for all containers
+- **Resource Reservations**: Define minimum resource requirements
+- **Monitoring**: Monitor resource usage and adjust limits as needed
+
+## Development Environment Setup
+
+### Local Development Standards
+- **Development Compose**: Separate docker-compose.dev.yml for development
+- **Volume Mounts**: Use bind mounts for source code during development
+- **Hot Reloading**: Enable hot reloading for development services
+- **Debug Ports**: Expose debug ports only in development environment
+
+### Development Workflow
+- **Code Changes**: Make changes to source code
+- **Local Testing**: Test changes in containerized environment
+- **Integration Testing**: Validate service communication
+- **Documentation**: Update relevant documentation
+- **Commit**: Commit with conventional commit messages
+
+## Production Deployment Patterns
+
+### Container Registry
+- **Image Tagging**: Use semantic versioning for image tags
+- **Registry Security**: Use private registries with proper authentication
+- **Image Signing**: Sign images for security validation
+- **Automated Builds**: Use CI/CD for automated image builds
+
+### Orchestration Platforms
+- **Kubernetes Ready**: Design containers to work with Kubernetes
+- **Docker Swarm Compatible**: Ensure compatibility with Docker Swarm
+- **Environment Agnostic**: Make containers work across different orchestration platforms
+
+### Security Considerations
+- **Secrets Management**: Never include secrets in images
+- **Network Policies**: Implement network segmentation
+- **Image Scanning**: Regularly scan for vulnerabilities
+- **Runtime Security**: Implement runtime security monitoring
+
+## Service Architecture Patterns
+
+### Microservices Design
+- **Single Responsibility**: Each service should have one clear purpose
+- **Data Ownership**: Each service should own its data
+- **API Design**: Design consistent, versioned APIs
+- **Async Communication**: Use message queues for async operations
+
+### Service Mesh Integration
+- **Sidecar Ready**: Design services to work with service mesh sidecars
+- **Observability**: Include proper logging and metrics endpoints
+- **Circuit Breakers**: Implement resilience patterns
+- **Load Balancing**: Design for external load balancing
+
+## Testing Strategies
+
+### Container Testing
+- **Unit Tests**: Test application logic in containers
+- **Integration Tests**: Test service-to-service communication
+- **End-to-End Tests**: Test complete workflows across services
+- **Performance Tests**: Validate performance under load
+
+This architecture ensures scalable, maintainable, and secure containerized applications following modern Docker best practices.

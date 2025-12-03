@@ -1,0 +1,282 @@
+---
+alwaysApply: true
+---
+
+# Linux Server - REG.RU
+
+## ⚠️ ВАЖНО: Приоритет автоматического подключения
+
+**ПРИОРИТЕТНЫЙ МЕТОД**: Используйте автоматическое подключение через PuTTY (plink/pscp) для всех операций. Это позволяет выполнять команды и копировать файлы без постоянного ввода пароля, что критично для автоматизации и скриптов.
+
+**Альтернативные методы** (SSH ключ или пароль) используйте только при необходимости интерактивной работы.
+
+---
+
+## Основные данные подключения
+
+**IPv4 адрес**: `95.163.230.61`  
+**Порт SSH**: `22`  
+**Логин**: `root`  
+**Пароль**: `7LfOgcrTvZxbMR9Y`
+
+**Дополнительные учетные данные:**
+- User: `datalab_read`
+- Password: `StrongTempPass123!` (если не меняли)
+
+**GITHUB_TOKEN**: `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`
+
+---
+
+## 🔥 Автоматическое подключение через PuTTY (ПРИОРИТЕТ)
+
+### Установка PuTTY
+
+```powershell
+# Через winget
+winget install PuTTY.PuTTY
+
+# Или скачать с официального сайта: https://www.putty.org/
+```
+
+После установки PuTTY, `plink.exe` и `pscp.exe` будут доступны в `C:\Program Files\PuTTY\`. Добавьте в PATH или используйте полный путь.
+
+### Получение Host Key Fingerprint
+
+Перед первым использованием автоматического подключения необходимо получить host key fingerprint сервера:
+
+```powershell
+# Выполнить один раз для получения fingerprint
+ssh root@95.163.230.61
+# При запросе подтвердите подключение (yes)
+# Скопируйте fingerprint из вывода (например: SHA256:xxxxx...)
+```
+
+**Или получить через plink:**
+```powershell
+plink -ssh root@95.163.230.61 -pw "7LfOgcrTvZxbMR9Y" -batch "hostname"
+# При первом запуске будет показан fingerprint - скопируйте его
+```
+
+**Замените `YOUR_HOST_KEY_FINGERPRINT` в примерах ниже на реальный fingerprint!**
+
+### Использование plink (командная строка PuTTY)
+
+```powershell
+# Добавить PuTTY в PATH для текущей сессии
+$env:Path += ";C:\Program Files\PuTTY"
+
+# Параметры подключения (сохраните в переменные для удобства)
+$server = "95.163.230.61"
+$user = "root"
+$pass = "7LfOgcrTvZxbMR9Y"
+$hostKey = "YOUR_HOST_KEY_FINGERPRINT"  # Замените на реальный fingerprint!
+
+# Выполнить команду без ввода пароля
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "hostname"
+
+# Выполнить несколько команд
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "cd /app && ls -la"
+
+# Выполнить команду с пайпами
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "docker exec civilx-universe cat /app/lib/api/client.ts | head -15"
+
+# Выполнить команду с проверкой контейнера
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "docker stats --no-stream civilx-backend_backend_1"
+```
+
+### Использование pscp (SCP через PuTTY)
+
+```powershell
+# Добавить PuTTY в PATH для текущей сессии
+$env:Path += ";C:\Program Files\PuTTY"
+
+# Параметры подключения
+$server = "95.163.230.61"
+$user = "root"
+$pass = "7LfOgcrTvZxbMR9Y"
+$hostKey = "YOUR_HOST_KEY_FINGERPRINT"  # Замените на реальный fingerprint!
+
+# Копирование файла на сервер
+pscp -pw $pass -hostkey $hostKey -batch "local-file.sh" "${user}@${server}:/tmp/"
+
+# Копирование файла с сервера
+pscp -pw $pass -hostkey $hostKey -batch "${user}@${server}:/tmp/file.sh" "./"
+
+# Копирование директории (рекурсивно)
+pscp -pw $pass -hostkey $hostKey -batch -r "C:\local\folder" "${user}@${server}:/remote/folder"
+
+# Копирование с сервера (рекурсивно)
+pscp -pw $pass -hostkey $hostKey -batch -r "${user}@${server}:/remote/folder" "C:\local\folder"
+```
+
+### Параметры PuTTY
+
+- `-ssh` - использовать SSH протокол
+- `-pw "пароль"` - передать пароль (автоматически, без запроса)
+- `-hostkey "..."` - автоматически принять host key (избегает интерактивного запроса)
+- `-batch` - неинтерактивный режим (не показывать диалоги)
+
+### Пример использования в скриптах
+
+```powershell
+# Сохранить параметры в переменные для удобства
+$server = "95.163.230.61"
+$user = "root"
+$pass = "7LfOgcrTvZxbMR9Y"
+$hostKey = "YOUR_HOST_KEY_FINGERPRINT"  # Замените на реальный fingerprint!
+
+# Добавить PuTTY в PATH
+$env:Path += ";C:\Program Files\PuTTY"
+
+# Выполнить команду
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "hostname"
+
+# Копировать файл
+pscp -pw $pass -hostkey $hostKey -batch "local-file.sh" "${user}@${server}:/tmp/"
+
+# Выполнить сложную команду с пайпами
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "docker exec civilx-universe cat /app/lib/api/client.ts | head -15"
+```
+
+### Примеры использования через PuTTY
+
+```powershell
+# Добавить PuTTY в PATH
+$env:Path += ";C:\Program Files\PuTTY"
+
+# Параметры подключения
+$server = "95.163.230.61"
+$user = "root"
+$pass = "7LfOgcrTvZxbMR9Y"
+$hostKey = "YOUR_HOST_KEY_FINGERPRINT"  # Замените на реальный fingerprint!
+
+# Проверка подключения
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "hostname"
+
+# Просмотр директории
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "ls -la /app"
+
+# Выполнение Docker команды
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "docker exec civilx-universe cat /app/lib/api/client.ts | head -15"
+
+# Проверка контейнера
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "docker stats --no-stream civilx-backend_backend_1"
+
+# Копирование файла на сервер
+pscp -pw $pass -hostkey $hostKey -batch "local-file.sh" "${user}@${server}:/tmp/"
+
+# Копирование файла с сервера
+pscp -pw $pass -hostkey $hostKey -batch "${user}@${server}:/tmp/file.sh" "./"
+```
+
+---
+
+## Альтернативные методы подключения
+
+### Подключение через SSH ключ
+
+```powershell
+ssh -i C:\Users\dimag\.ssh\Universe root@95.163.230.61
+```
+
+**Открытие туннеля для PowerBI:**
+```powershell
+ssh -i C:\Users\dimag\.ssh\Universe -L 5433:localhost:5432 root@95.163.230.61
+```
+
+### Подключение через SSH с паролем (интерактивное)
+
+```powershell
+ssh root@95.163.230.61
+# При запросе введите пароль: 7LfOgcrTvZxbMR9Y
+```
+
+---
+
+## Формат команд SSH/SCP
+
+**КРИТИЧЕСКИ ВАЖНО**: При выполнении SSH/SCP команд на сервере всегда используйте правильный формат:
+
+### Правильный формат (ОБЯЗАТЕЛЬНО):
+- Команда должна начинаться с PowerShell prompt: `PS C:\Projects\CivilX\Site\...>`
+- Вся команда должна быть в одной строке (без разрывов)
+- Пайпы `|` и все части команды должны быть в той же строке
+
+**Пример правильной команды через PuTTY (рекомендуется):**
+```powershell
+PS C:\Projects\CivilX\Site\civilx-website\universe\universe> plink -ssh "root@95.163.230.61" -pw "7LfOgcrTvZxbMR9Y" -hostkey "YOUR_HOST_KEY_FINGERPRINT" -batch "docker exec civilx-universe cat /app/lib/api/client.ts | head -15"
+```
+
+**Пример правильной команды через стандартный SSH:**
+```powershell
+PS C:\Projects\CivilX\Site\civilx-website\universe\universe> ssh root@95.163.230.61 "docker exec civilx-universe cat /app/lib/api/client.ts | head -15"
+```
+
+### Неправильный формат (НЕ ИСПОЛЬЗОВАТЬ):
+- ❌ Команды, начинающиеся с `>>` (символ продолжения команды)
+- ❌ Команды с разрывами строк внутри
+- ❌ Пайпы `|` на отдельной строке
+- ❌ Склеенные команды без разделителей
+
+**Примеры неправильных команд:**
+```
+>> ssh root@95.163.230.61 "grep -A 10 'location. *signup' /etc/nginx/sites-available/civilxuniverse.ru | head -25
+```
+
+```
+>> ssh root@95.163.230.61 "grep -A 10 'location. *signup' /etc/nginx/sites-available/civilxuniverse.ru
+| head -25
+```
+
+```
+scp file.sh root@95.163.230.61:/tmp/
+qcscp another-file.sh root@95.163.230.61:/tmp/
+```
+
+### Правила:
+1. **Всегда** начинайте команду с `PS C:\Projects\CivilX\Site\...>` (PowerShell prompt)
+2. **Всегда** пишите команду в одной строке
+3. **Никогда** не используйте `>>` в начале команды
+4. **Всегда** размещайте пайпы `|` в той же строке, что и команда
+5. **Всегда** разделяйте отдельные команды переносами строк или точкой с запятой
+6. **Предпочтительно** используйте PuTTY (plink/pscp) для автоматизации
+
+---
+
+## Дополнительные команды
+
+### Открытие туннеля для PowerBI
+
+**Через SSH ключ:**
+```powershell
+ssh -i C:\Users\dimag\.ssh\Universe -L 5433:localhost:5432 root@95.163.230.61
+```
+
+**Через PuTTY (автоматически):**
+```powershell
+$env:Path += ";C:\Program Files\PuTTY"
+$server = "95.163.230.61"
+$user = "root"
+$pass = "7LfOgcrTvZxbMR9Y"
+$hostKey = "YOUR_HOST_KEY_FINGERPRINT"
+
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -L 5433:localhost:5432 -N
+```
+
+### Проверка контейнера
+
+**Через стандартный SSH:**
+```powershell
+ssh root@95.163.230.61 'for i in $(seq 1 20); do echo "===== BACKEND SAMPLE $i ====="; date +%T; docker stats --no-stream civilx-backend_backend_1; echo "-- process memory --"; docker exec civilx-backend_backend_1 sh -c "ps -o pid,comm,rss 2>/dev/null | tail -n +2 | sort -k3 -nr | head -n 10" 2>/dev/null || echo "Cannot access processes"; echo; sleep 15; done'
+```
+
+**Через PuTTY (автоматически):**
+```powershell
+$env:Path += ";C:\Program Files\PuTTY"
+$server = "95.163.230.61"
+$user = "root"
+$pass = "7LfOgcrTvZxbMR9Y"
+$hostKey = "YOUR_HOST_KEY_FINGERPRINT"
+
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch "for i in \$(seq 1 20); do echo \"===== BACKEND SAMPLE \$i =====\"; date +%T; docker stats --no-stream civilx-backend_backend_1; echo \"-- process memory --\"; docker exec civilx-backend_backend_1 sh -c \"ps -o pid,comm,rss 2>/dev/null | tail -n +2 | sort -k3 -nr | head -n 10\" 2>/dev/null || echo \"Cannot access processes\"; echo; sleep 15; done"
+```

@@ -1,0 +1,878 @@
+---
+alwaysApply: true
+---
+
+# Prod сервер - Основная информация
+
+## ⚠️ КРИТИЧЕСКИ ВАЖНО: Автозапуск монитора RVT-CSV конвертации
+
+**ОБЯЗАТЕЛЬНО**: Скрипт `monitor-rvt-converter.py` должен автоматически запускаться при перезагрузке сервера и перезапуске Docker контейнеров.
+
+**Подробные инструкции**: См. файл `monitor-rvt-converter-autostart.mdc` в этой же директории.
+
+**Быстрая настройка**:
+```bash
+# Создать systemd service (см. monitor-rvt-converter-autostart.mdc)
+systemctl daemon-reload
+systemctl enable monitor-rvt-converter.service
+systemctl start monitor-rvt-converter.service
+```
+
+---
+
+# Обработка ошибок авторизации в CivilX.Universe
+
+## Требование: Автоматический редирект на страницу авторизации
+
+**КРИТИЧЕСКИ ВАЖНО**: При любых ошибках авторизации (401 Unauthorized, отсутствие токена, истекший токен) пользователь **ДОЛЖЕН** автоматически перенаправляться на страницу авторизации (`/auth/login`). **НИКОГДА** не показывайте пользователю ошибку "требуется авторизация" или подобные сообщения - вместо этого выполните редирект.
+
+## Реализация
+
+### 1. API Client (`lib/api/client.ts`)
+
+При получении ответа 401 от API:
+
+```typescript
+if (response.status === 401) {
+  // Всегда удаляем токен при 401 (он невалиден или истек)
+  removeAuthToken()
+  // Всегда редиректим на авторизацию при 401
+  redirectToAuth()
+  // Бросаем специальную ошибку с флагом isAuthRedirect = true
+  // Эта ошибка будет игнорироваться в компонентах
+  const redirectError = new Error('Требуется авторизация')
+  ;(redirectError as any).isAuthRedirect = true
+  throw redirectError
+}
+```
+
+**Важно**: 
+- Функция `redirectToAuth()` выполняет `window.location.href = '/auth/login'`
+- Ошибка с флагом `isAuthRedirect = true` используется для того, чтобы компоненты не показывали ошибку пользователю
+
+### 2. Обработка ошибок в компонентах
+
+Во всех компонентах, которые делают API запросы, **ОБЯЗАТЕЛЬНО** проверяйте флаг `isAuthRedirect` и игнорируйте ошибку, если редирект уже произошел:
+
+```typescript
+try {
+  const data = await apiGet('/some-endpoint')
+  // ... обработка данных
+} catch (err: any) {
+  console.error('Ошибка загрузки данных:', err)
+  // Игнорируем ошибки авторизации - редирект уже произошел
+  if (err.isAuthRedirect) {
+    return // Не показываем ошибку, редирект уже выполнен
+  }
+  // Показываем ошибку только если это не ошибка авторизации
+  setError(err.message || 'Не удалось загрузить данные')
+}
+```
+
+### 3. Утилита для проверки ошибок авторизации
+
+В `lib/api/client.ts` есть утилита `isAuthError()`:
+
+```typescript
+export function isAuthError(error: any): boolean {
+  return error?.isAuthRedirect === true || error?.message === 'Требуется авторизация'
+}
+```
+
+Используйте её для проверки ошибок авторизации в компонентах.
+
+## Где применять
+
+Это требование применяется **ВСЕГДА** в следующих местах:
+
+1. **Все API запросы** через `apiRequest()`, `apiGet()`, `apiPost()`, `apiPut()`, `apiDelete()`, `apiPostFormData()`
+2. **Все компоненты**, которые делают API запросы:
+   - Страницы datalab (`app/app/datalab/**/*.tsx`)
+   - Компоненты (`components/**/*.tsx`)
+   - Хуки (`lib/hooks/**/*.ts`)
+3. **Все обработчики ошибок** в `catch` блоках
+
+## Примеры правильной реализации
+
+### ✅ Правильно:
+
+```typescript
+try {
+  const projects = await getProjects()
+  setProjects(projects)
+} catch (err: any) {
+  // Игнорируем ошибки авторизации - редирект уже произошел
+  if (err.isAuthRedirect) {
+    return
+  }
+  setError(err.message || 'Не удалось загрузить проекты')
+}
+```
+
+### ❌ Неправильно:
+
+```typescript
+try {
+  const projects = await getProjects()
+  setProjects(projects)
+} catch (err: any) {
+  // НЕПРАВИЛЬНО: показываем ошибку "требуется авторизация" пользователю
+  setError(err.message || 'Не удалось загрузить проекты')
+}
+```
+
+## Устранение проблемы "требуется авторизация"
+
+Если пользователь видит ошибку "требуется авторизация" вместо автоматического редиректа:
+
+1. **Проверьте `lib/api/client.ts`**:
+   - Убедитесь, что при 401 вызывается `redirectToAuth()`
+   - Убедитесь, что ошибка помечается флагом `isAuthRedirect = true`
+
+2. **Проверьте компоненты**:
+   - Убедитесь, что во всех `catch` блоках есть проверка `if (err.isAuthRedirect) return`
+   - Убедитесь, что ошибка не показывается пользователю, если `isAuthRedirect === true`
+
+3. **Проверьте `lib/api/auth.ts`**:
+   - Убедитесь, что функция `redirectToAuth()` выполняет `window.location.href = '/auth/login'`
+
+## Чек-лист при добавлении нового API запроса
+
+- [ ] API запрос использует функции из `lib/api/client.ts` (apiGet, apiPost, etc.)
+- [ ] В обработчике ошибок есть проверка `if (err.isAuthRedirect) return`
+- [ ] Ошибка авторизации не показывается пользователю
+- [ ] Редирект на `/auth/login` происходит автоматически
+
+## История исправления
+
+**Дата**: 2024-11-28  
+**Проблема**: Пользователь видел ошибку "требуется авторизация" на странице datalab вместо автоматического редиректа  
+**Решение**: 
+- Добавлена обработка 401 ошибок в `lib/api/client.ts` с автоматическим редиректом
+- Добавлен флаг `isAuthRedirect` для маркировки ошибок авторизации
+- Обновлены все компоненты datalab для игнорирования ошибок авторизации
+- Добавлена утилита `isAuthError()` для проверки ошибок авторизации
+
+---
+
+# База данных PostgreSQL в CivilX.Universe
+
+## ⚠️ КРИТИЧЕСКИ ВАЖНО: Подключение к PostgreSQL
+
+**ОБЯЗАТЕЛЬНО**: Бэкенд должен использовать PostgreSQL, а не SQLite. Если PostgreSQL недоступен, бэкенд автоматически переключается на SQLite (fallback), что приводит к использованию другой базы данных и потере данных.
+
+## Конфигурация подключения
+
+### DATABASE_URL в `.env` файле
+
+**Расположение**: `/opt/civilx-backend/.env` (на сервере)
+
+**Правильный формат**:
+```env
+DATABASE_URL=postgresql://datalab_read:StrongTempPass123!@localhost:5432/civilx_universe
+```
+
+**Важные моменты**:
+- **НЕ используйте** `host.docker.internal:5432` - это работает только для Docker контейнеров
+- **Используйте** `localhost:5432` для процессов, запущенных напрямую на сервере
+- **Пользователь**: `datalab_read` (для чтения/записи данных Universe)
+- **Пароль**: `StrongTempPass123!`
+- **База данных**: `civilx_universe`
+- **Порт**: `5432` (стандартный порт PostgreSQL)
+
+### Альтернативные учетные данные
+
+Если `datalab_read` недоступен, можно использовать:
+```env
+DATABASE_URL=postgresql://postgres:grosheva78@localhost:5432/civilx_universe
+```
+
+**Важно**: После изменения `DATABASE_URL` необходимо перезапустить бэкенд.
+
+## Автоматический fallback на SQLite
+
+### Где происходит переключение
+
+**Файл**: `civilx-website/backend/app/core/database.py` (строки 14-30)
+
+**Логика**:
+1. Бэкенд пытается подключиться к PostgreSQL по `DATABASE_URL`
+2. Если подключение не удается (таймаут 2 секунды), происходит fallback на SQLite
+3. SQLite база создается в `/opt/civilx-backend/data/civilx_universe.db`
+
+**Проблема**: При использовании SQLite данные из PostgreSQL недоступны, что приводит к ошибкам авторизации и потере данных.
+
+### Как проверить, какая база используется
+
+**На сервере**:
+```bash
+cd /opt/civilx-backend
+/opt/civilx-backend/venv/bin/python -c "
+from app.core.database import engine
+print(f'Database URL: {engine.url}')
+"
+```
+
+**Ожидаемый результат** (PostgreSQL):
+```
+Database URL: postgresql://datalab_read:***@localhost:5432/civilx_universe
+```
+
+**Неправильный результат** (SQLite):
+```
+Database URL: sqlite:////opt/civilx-backend/data/civilx_universe.db
+```
+
+**В логах бэкенда**:
+- ✅ **Хорошо**: Нет сообщений о SQLite
+- ❌ **Плохо**: Сообщение `⚠️  PostgreSQL недоступен, используем SQLite для разработки`
+
+## Структура базы данных PostgreSQL
+
+### Основная информация
+
+- **СУБД**: PostgreSQL
+- **Название базы**: `civilx_universe`
+- **Кодировка**: UTF-8
+- **UUID**: Используется для всех первичных ключей
+- **Схема**: `public`
+
+### Основные таблицы
+
+#### 1. `universe_users` (Пользователи Universe)
+
+**Назначение**: Хранит информацию о пользователях платформы Universe
+
+**Структура**:
+| Столбец | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | UUID | PRIMARY KEY, DEFAULT gen_random_uuid() | Уникальный идентификатор пользователя |
+| `email` | VARCHAR(255) | UNIQUE, NOT NULL | Email пользователя (уникальный) |
+| `password_hash` | VARCHAR(255) | NOT NULL | Хеш пароля (bcrypt) |
+| `name` | VARCHAR(255) | NOT NULL | Имя пользователя |
+| `company_name` | VARCHAR(255) | NULL | Название компании (необязательно) |
+| `is_active` | BOOLEAN | NOT NULL, DEFAULT TRUE | Активен ли пользователь |
+| `is_verified` | BOOLEAN | NOT NULL, DEFAULT FALSE | Верифицирован ли email |
+| `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL, DEFAULT NOW() | Дата создания |
+| `updated_at` | TIMESTAMP WITH TIME ZONE | NOT NULL, DEFAULT NOW() | Дата последнего обновления |
+
+**Индексы**:
+- `idx_universe_users_email` ON `email`
+- `idx_universe_users_id` ON `id`
+
+**SQL для создания**:
+```sql
+CREATE TABLE IF NOT EXISTS universe_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    company_name VARCHAR(255) NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+```
+
+#### 2. `projects` (Проекты)
+
+**Назначение**: Хранит информацию о проектах
+
+**Основные поля**:
+- `id` (UUID) - уникальный идентификатор проекта
+- `name` (VARCHAR) - название проекта
+- `slug` (VARCHAR) - URL-дружественный идентификатор
+- `created_at`, `updated_at` - временные метки
+
+#### 3. `project_versions` (Версии проектов)
+
+**Назначение**: Хранит версии проектов (снимки на определенный момент времени)
+
+**Основные поля**:
+- `id` (UUID) - уникальный идентификатор версии
+- `project_id` (UUID) - ссылка на проект
+- `name` (VARCHAR) - название версии
+- `created_at` - дата создания версии
+
+#### 4. `file_uploads` (Загруженные файлы)
+
+**Назначение**: Хранит метаданные о загруженных файлах (RVT, CSV)
+
+**Основные поля**:
+- `id` (UUID) - уникальный идентификатор файла
+- `project_id` (UUID) - ссылка на проект
+- `version_id` (UUID) - ссылка на версию проекта
+- `file_type` (VARCHAR) - тип файла (RVT, CSV)
+- `storage_path` (VARCHAR) - путь к файлу в хранилище
+- `model_name` (VARCHAR) - имя модели
+- `created_at` - дата загрузки
+
+#### 5. `csv_data_rows` (Данные из CSV)
+
+**Назначение**: Хранит данные из CSV файлов (трансформированные в long format)
+
+**Основные поля**:
+- `id` (UUID) - уникальный идентификатор строки
+- `file_upload_id` (UUID) - ссылка на загруженный файл
+- `element_id` (VARCHAR) - ID элемента
+- `category` (VARCHAR) - категория элемента
+- `model_name` (VARCHAR) - имя модели
+- `parameter_name` (VARCHAR) - название параметра
+- `parameter_value` (TEXT) - значение параметра
+- `created_at` - дата создания записи
+
+**Индексы**: Создаются для быстрого поиска по `file_upload_id`, `element_id`, `category`, `model_name`, `parameter_name`
+
+#### 6. `conversion_jobs` (Задачи конвертации)
+
+**Назначение**: Хранит информацию о задачах конвертации RVT→CSV
+
+**Основные поля**:
+- `id` (UUID) - уникальный идентификатор задачи
+- `file_upload_id` (UUID) - ссылка на загруженный RVT файл
+- `status` (VARCHAR) - статус задачи (pending, queued, processing, completed, failed)
+- `conversion_type` (VARCHAR) - тип конвертации (RVT_TO_CSV)
+- `progress` (INTEGER) - прогресс выполнения (0-100)
+- `error_message` (TEXT) - сообщение об ошибке (если есть)
+- `created_at`, `started_at`, `completed_at` - временные метки
+
+#### 7. `pivot_reports` (Pivot-отчеты / Вкладки)
+
+**Назначение**: Хранит сохраненные Pivot-отчеты (вкладки) для проектов и версий
+
+**Структура**:
+| Столбец | Тип | Ограничения | Описание |
+|---------|-----|-------------|----------|
+| `id` | UUID | PRIMARY KEY, DEFAULT gen_random_uuid() | Уникальный идентификатор отчета |
+| `name` | VARCHAR(255) | NOT NULL | Название отчета (вкладки) |
+| `description` | TEXT | NULL | Описание отчета (необязательно) |
+| `project_id` | UUID | NOT NULL, FK → projects(id) | Ссылка на проект |
+| `version_id` | UUID | NOT NULL, FK → project_versions(id) | Ссылка на версию проекта |
+| `user_id` | UUID | NULL | ID пользователя (владелец отчета) |
+| `rows` | JSONB | NOT NULL, DEFAULT '[]'::jsonb | Список полей для строк (JSON массив строк) |
+| `columns` | JSONB | NOT NULL, DEFAULT '[]'::jsonb | Список полей для колонок (JSON массив строк) |
+| `values` | JSONB | NOT NULL, DEFAULT '[]'::jsonb | Список агрегаций (JSON массив объектов PivotAggregation) |
+| `filters` | JSONB | NULL | Дополнительные фильтры (JSON объект) |
+| `pivot_data` | JSONB | NULL | Результаты pivot-таблицы (JSON объект PivotResponse) |
+| `created_at` | TIMESTAMP WITH TIME ZONE | NOT NULL, DEFAULT NOW() | Дата создания отчета |
+| `updated_at` | TIMESTAMP WITH TIME ZONE | NOT NULL, DEFAULT NOW() | Дата последнего обновления отчета |
+
+**Индексы**:
+- `idx_pivot_reports_project_id` ON `project_id`
+- `idx_pivot_reports_version_id` ON `version_id`
+- `idx_pivot_reports_user_id` ON `user_id`
+- `idx_pivot_reports_project_version` ON `project_id`, `version_id`
+
+**Внешние ключи**:
+- `fk_pivot_reports_project` → `projects(id)` ON DELETE CASCADE
+- `fk_pivot_reports_version` → `project_versions(id)` ON DELETE CASCADE
+
+**Триггеры**:
+- `trigger_update_pivot_reports_updated_at` - автоматически обновляет `updated_at` при изменении записи
+
+**SQL для создания**:
+```sql
+CREATE TABLE IF NOT EXISTS pivot_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    project_id UUID NOT NULL,
+    version_id UUID NOT NULL,
+    user_id UUID,
+    rows JSONB NOT NULL DEFAULT '[]'::jsonb,
+    columns JSONB NOT NULL DEFAULT '[]'::jsonb,
+    values JSONB NOT NULL DEFAULT '[]'::jsonb,
+    filters JSONB,
+    pivot_data JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_pivot_reports_project 
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_pivot_reports_version 
+        FOREIGN KEY (version_id) REFERENCES project_versions(id) ON DELETE CASCADE
+);
+```
+
+**Права доступа**:
+- Пользователь `datalab_read` должен иметь права: `SELECT`, `INSERT`, `UPDATE`, `DELETE`
+- Права на последовательности: `USAGE`, `SELECT` (для UUID генерации)
+- Права на функции: `EXECUTE` (для триггеров)
+
+## Подключение к базе данных
+
+### Через psql (командная строка)
+
+**На сервере**:
+```bash
+# С пользователем datalab_read
+PGPASSWORD='StrongTempPass123!' psql -h localhost -U datalab_read -d civilx_universe
+
+# Или с пользователем postgres
+sudo -u postgres psql -d civilx_universe
+```
+
+### Через PowerBI (SSH туннель)
+
+**На локальной машине**:
+```powershell
+# Открыть SSH туннель
+ssh -i C:\Users\dimag\.ssh\Universe -L 5433:localhost:5432 root@95.163.230.61
+```
+
+**В PowerBI**:
+```
+Host: localhost
+Port: 5433
+Database: civilx_universe
+User: datalab_read
+Password: StrongTempPass123!
+```
+
+**Запрос для получения всех пользователей**:
+```sql
+SELECT * FROM public.universe_users;
+```
+
+## Проверка подключения
+
+### Проверка на сервере
+
+```bash
+# Проверить, что PostgreSQL запущен
+sudo systemctl status postgresql
+
+# Проверить подключение
+PGPASSWORD='StrongTempPass123!' psql -h localhost -U datalab_read -d civilx_universe -c "SELECT COUNT(*) FROM universe_users;"
+
+# Проверить, что бэкенд использует PostgreSQL
+cd /opt/civilx-backend
+/opt/civilx-backend/venv/bin/python -c "
+from app.core.database import engine
+print(f'Database: {engine.url}')
+"
+```
+
+### Проверка через API
+
+```bash
+# Проверить здоровье API
+curl https://civilxuniverse.ru/api/datalab/health/
+
+# Проверить авторизацию (должна работать с пользователями из PostgreSQL)
+curl -X POST https://civilxuniverse.ru/api/datalab/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"dima.groshev05@gmail.com","password":"grosheva78"}'
+```
+
+## Устранение проблем
+
+### Проблема: Бэкенд использует SQLite вместо PostgreSQL
+
+**Признаки**:
+- В логах бэкенда: `⚠️  PostgreSQL недоступен, используем SQLite для разработки`
+- Пользователи не могут авторизоваться (пользователи есть в PostgreSQL, но не в SQLite)
+- Данные не сохраняются или теряются
+
+**Решение**:
+1. Проверить `DATABASE_URL` в `/opt/civilx-backend/.env`
+2. Убедиться, что используется `localhost:5432`, а не `host.docker.internal:5432`
+3. Проверить, что PostgreSQL запущен: `sudo systemctl status postgresql`
+4. Проверить доступность PostgreSQL: `PGPASSWORD='StrongTempPass123!' psql -h localhost -U datalab_read -d civilx_universe -c "SELECT 1;"`
+5. Перезапустить бэкенд после изменения `DATABASE_URL`
+
+### Проблема: Ошибка подключения к PostgreSQL
+
+**Ошибка**: `FATAL: password authentication failed for user "datalab_read"`
+
+**Решение**:
+1. Проверить правильность пароля в `DATABASE_URL`
+2. Проверить, что пользователь `datalab_read` существует в PostgreSQL
+3. Проверить права доступа пользователя к базе `civilx_universe`
+
+### Проблема: Пользователь не найден при авторизации
+
+**Признаки**:
+- Ошибка 401 при попытке авторизации
+- Пользователь существует в PostgreSQL, но бэкенд его не находит
+
+**Решение**:
+1. Проверить, что бэкенд использует PostgreSQL (см. выше)
+2. Проверить, что пользователь существует в таблице `universe_users`:
+   ```sql
+   SELECT * FROM universe_users WHERE email = 'user@example.com';
+   ```
+3. Перезапустить бэкенд после исправления `DATABASE_URL`
+
+### Проблема: Ошибка при создании вкладок (pivot-отчетов)
+
+**Ошибка**: `permission denied for table pivot_reports` или `(psycopg2.errors.InsufficientPrivilege) permission denied for table pivot_reports`
+
+**Признаки**:
+- При попытке создать pivot-отчет (вкладку) возникает ошибка 500
+- В логах бэкенда: `permission denied for table pivot_reports`
+- Пользователь `datalab_read` не имеет прав на INSERT в таблицу `pivot_reports`
+
+**Причина**:
+- Таблица `pivot_reports` была создана, но права доступа не были выданы пользователю `datalab_read`
+- Пользователь `datalab_read` имеет права только на чтение, но не на запись
+
+**Решение**:
+
+1. **Копирование SQL скрипта на сервер**:
+   ```powershell
+   # Через стандартный SCP
+   scp C:\Projects\CivilX\Site\civilx-website\database\fix-pivot-reports-permissions.sql root@95.163.230.61:/tmp/
+   
+   # Или через PuTTY (автоматически)
+   $env:Path += ";C:\Program Files\PuTTY"
+   pscp -pw "7LfOgcrTvZxbMR9Y" -hostkey "ssh-ed25519 255 SHA256:gN8PzkTrFZUTD+sfsvJVTRXjg6up6VMQ8n2rAt6PnZk" -batch "C:\Projects\CivilX\Site\civilx-website\database\fix-pivot-reports-permissions.sql" "root@95.163.230.61:/tmp/"
+   ```
+
+2. **Выполнение SQL скрипта на сервере**:
+   ```bash
+   # Подключиться к серверу
+   ssh root@95.163.230.61
+   
+   # Выполнить SQL скрипт
+   sudo -u postgres psql -d civilx_universe -f /tmp/fix-pivot-reports-permissions.sql
+   ```
+
+3. **Проверка прав доступа**:
+   ```bash
+   # Проверить, что права выданы
+   sudo -u postgres psql -d civilx_universe -c "
+   SELECT grantee, privilege_type 
+   FROM information_schema.role_table_grants 
+   WHERE table_schema = 'public' 
+   AND table_name = 'pivot_reports' 
+   AND grantee = 'datalab_read';
+   "
+   ```
+
+   **Ожидаемый результат**:
+   ```
+    grantee    | privilege_type 
+   ------------+----------------
+    datalab_read | SELECT
+    datalab_read | INSERT
+    datalab_read | UPDATE
+    datalab_read | DELETE
+   ```
+
+**Альтернативное решение (выдача прав вручную)**:
+
+Если скрипт не работает, можно выдать права вручную:
+
+```sql
+-- Подключиться к PostgreSQL
+sudo -u postgres psql -d civilx_universe
+
+-- Выдать права на таблицу
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE pivot_reports TO datalab_read;
+
+-- Выдать права на последовательности (для UUID генерации)
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO datalab_read;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO datalab_read;
+
+-- Выдать права на функции (для триггеров)
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO datalab_read;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO datalab_read;
+
+-- Выйти
+\q
+```
+
+**Что делает скрипт `fix-pivot-reports-permissions.sql`**:
+1. Проверяет существование таблицы `pivot_reports`
+2. Добавляет поле `pivot_data`, если его нет (для совместимости с моделью)
+3. Выдает права пользователю `datalab_read`:
+   - `SELECT` - чтение данных
+   - `INSERT` - вставка новых записей (создание вкладок)
+   - `UPDATE` - обновление существующих записей
+   - `DELETE` - удаление записей
+4. Выдает права на последовательности (для UUID генерации)
+5. Выдает права на функции (для триггеров)
+
+**Проверка после исправления**:
+1. ✅ Права выданы пользователю `datalab_read`
+2. ✅ Поле `pivot_data` существует в таблице
+3. ✅ Создание pivot-отчета (вкладки) работает без ошибок
+4. ✅ Обновление pivot-отчета работает без ошибок
+5. ✅ Удаление pivot-отчета работает без ошибок
+
+**Файлы**:
+- SQL скрипт: `civilx-website/database/fix-pivot-reports-permissions.sql`
+- Инструкция: `civilx-website/database/APPLY_PIVOT_REPORTS_PERMISSIONS.md`
+
+## История исправления подключения к PostgreSQL
+
+**Дата**: 2024-11-29  
+**Проблема**: Бэкенд использовал SQLite вместо PostgreSQL, что приводило к ошибкам авторизации  
+**Причина**: `DATABASE_URL` указывал на `host.docker.internal:5432` (для Docker), но бэкенд запущен напрямую на сервере  
+**Решение**: 
+- Исправлен `DATABASE_URL` в `/opt/civilx-backend/.env` на `postgresql://datalab_read:StrongTempPass123!@localhost:5432/civilx_universe`
+- Перезапущен бэкенд
+- Проверено, что бэкенд использует PostgreSQL (нет сообщений о SQLite в логах)
+
+---
+
+## История исправления прав доступа к таблице pivot_reports
+
+**Дата**: 2024-11-29  
+**Проблема**: Ошибка `permission denied for table pivot_reports` при создании вкладок (pivot-отчетов)  
+**Причина**: Пользователь `datalab_read` не имел прав на INSERT/UPDATE/DELETE в таблицу `pivot_reports`  
+**Решение**: 
+- Создан SQL скрипт `fix-pivot-reports-permissions.sql` для выдачи прав доступа
+- Выполнен скрипт на сервере через `sudo -u postgres psql -d civilx_universe -f /tmp/fix-pivot-reports-permissions.sql`
+- Выданы права пользователю `datalab_read`: SELECT, INSERT, UPDATE, DELETE на таблицу `pivot_reports`
+- Выданы права на последовательности и функции для корректной работы триггеров
+- Проверено, что создание вкладок работает без ошибок
+
+---
+
+# Отображение загруженности сервера конвертации и очереди
+
+## Требование: Индикатор нагрузки на странице загрузки файлов
+
+**КРИТИЧЕСКИ ВАЖНО**: На странице "Загрузка файлов" (`/app/datalab/upload`) должен отображаться индикатор загруженности сервера конвертации. Индикатор размещается справа от заголовка "Мониторинг конвертации проекта" на том же уровне по высоте.
+
+## Реализация
+
+### 1. API Endpoint для получения статуса очереди
+
+**Эндпоинт**: `GET /api/datalab/conversion/queue/status`
+
+**Расположение**: `civilx-website/backend/app/api/v1/conversion.py`
+
+**Возвращаемые данные**:
+```json
+{
+  "queuedCount": 0,              // Количество задач в очереди (status="queued")
+  "processingCount": 0,          // Количество активных задач (status="processing")
+  "windowsServerBusy": false,    // Занят ли Windows сервер (null если ошибка)
+  "nextJobId": null,             // ID следующей задачи в очереди
+  "hasQueue": false              // Есть ли задачи в очереди (queuedCount > 0)
+}
+```
+
+**Источники данных**:
+1. **PostgreSQL БД** (на Linux сервере `95.163.230.61`):
+   - `queuedCount` - количество задач со статусом `"queued"` в таблице `conversion_jobs`
+   - `processingCount` - количество задач со статусом `"processing"` в таблице `conversion_jobs`
+   - `nextJobId` - ID первой задачи в очереди (FIFO)
+
+2. **Windows сервер** (`176.98.178.75:8001`) через API:
+   - `windowsServerBusy` - проверяется через `RemoteRVTConverterService.is_busy()`
+   - Делается HTTP GET запрос к `http://176.98.178.75:8001/status`
+   - Windows сервер возвращает информацию о занятости через глобальное состояние `_conversion_slots`
+
+### 2. Фронтенд API функция
+
+**Файл**: `civilx-website/universe/universe/lib/api/upload.ts`
+
+**Функция**:
+```typescript
+export async function getQueueStatus(): Promise<QueueStatus> {
+  const response = await fetch(`${API_BASE_URL}/conversion/queue/status`)
+  
+  if (!response.ok) {
+    throw new Error('Ошибка получения статуса очереди')
+  }
+  
+  return response.json()
+}
+```
+
+**Важно**: URL должен быть **БЕЗ trailing slash**: `/conversion/queue/status` (не `/conversion/queue/status/`), так как nginx проксирует на бэкенд напрямую, а бэкенд работает только без trailing slash.
+
+### 3. Компонент индикатора нагрузки
+
+**Файл**: `civilx-website/universe/universe/components/datalab/ConversionStatusList.tsx`
+
+**Размещение**: Индикатор размещается справа от заголовка "Мониторинг конвертации проекта" на том же уровне по высоте.
+
+**Логика определения статуса**:
+
+```typescript
+const getLoadStatus = () => {
+  // Ошибка получения статуса
+  if (queueStatusError) {
+    return {
+      text: 'Ошибка',
+      className: 'text-red-300 bg-red-500/10 border-red-500/40',
+    }
+  }
+
+  // Статус еще не загружен
+  if (!queueStatus) {
+    return null
+  }
+
+  // Высокая нагрузка: Windows сервер занят ИЛИ есть задачи в очереди
+  const isHighLoad = queueStatus.windowsServerBusy === true || queueStatus.queuedCount > 0
+
+  if (isHighLoad) {
+    return {
+      text: 'Высокая нагрузка',
+      className: 'text-amber-300 bg-amber-400/10 border-amber-400/30',
+    }
+  }
+
+  // Нормальная нагрузка: Windows сервер свободен И нет задач в очереди
+  return {
+    text: 'Нормальная нагрузка',
+    className: 'text-emerald-300 bg-emerald-400/10 border-emerald-400/30',
+  }
+}
+```
+
+**Статусы индикатора**:
+
+| Статус | Цвет | Условие |
+|--------|------|---------|
+| **Нормальная нагрузка** | Зеленый (`text-emerald-300 bg-emerald-400/10 border-emerald-400/30`) | `windowsServerBusy === false` И `queuedCount === 0` |
+| **Высокая нагрузка** | Желтый (`text-amber-300 bg-amber-400/10 border-amber-400/30`) | `windowsServerBusy === true` ИЛИ `queuedCount > 0` |
+| **Ошибка** | Красный (`text-red-300 bg-red-500/10 border-red-500/40`) | Ошибка получения статуса очереди |
+
+### 4. Обновление статуса
+
+**Частота обновления**: Каждые 5 секунд (без анимации загрузки)
+
+**Реализация**:
+```typescript
+useEffect(() => {
+  const fetchQueueStatus = async () => {
+    try {
+      setQueueStatusError(null)
+      const status = await getQueueStatus()
+      setQueueStatus(status)
+    } catch (err: any) {
+      console.error('Ошибка получения статуса очереди:', err)
+      // Игнорируем ошибки авторизации - редирект уже произошел
+      if (err.isAuthRedirect) {
+        return
+      }
+      setQueueStatusError(err.message || 'Не удалось получить статус очереди')
+      setQueueStatus(null)
+    }
+  }
+
+  // Загружаем сразу
+  fetchQueueStatus()
+
+  // Обновляем каждые 5 секунд
+  const interval = setInterval(fetchQueueStatus, 5000)
+
+  return () => {
+    clearInterval(interval)
+  }
+}, [])
+```
+
+**Важно**: 
+- Обновление происходит **без анимации загрузки** (не показывается индикатор загрузки)
+- Ошибки авторизации игнорируются (редирект уже произошел)
+
+### 5. Визуальное отображение
+
+**Размещение**: Справа от заголовка "Мониторинг конвертации проекта" на том же уровне по высоте
+
+**Стиль**: Блок (визуально как кнопка) с текстом и цветовой индикацией
+
+**Пример разметки**:
+```tsx
+<div className="flex items-center gap-4">
+  <div>
+    <p className="text-sm uppercase tracking-wider text-primary-400">{title}</p>
+    <h3 className="text-2xl font-semibold text-white">Конвертации проекта</h3>
+  </div>
+  {loadStatus && (
+    <div
+      className={cn(
+        'rounded-full border px-4 py-1.5 text-sm font-semibold',
+        loadStatus.className
+      )}
+    >
+      {loadStatus.text}
+    </div>
+  )}
+</div>
+```
+
+## Логика определения загруженности
+
+### Нормальная нагрузка (зеленый)
+
+**Условия**:
+- `windowsServerBusy === false` (Windows сервер свободен)
+- `queuedCount === 0` (нет задач в очереди)
+
+**Когда отображается**:
+- Пользователь отправляет модель на конвертацию
+- Алгоритмы проверяют, что на Windows сервере не идет никакой конвертации другой модели
+- Сервер свободен, модель запускается сразу
+
+### Высокая нагрузка (желтый)
+
+**Условия**:
+- `windowsServerBusy === true` (Windows сервер занят) **ИЛИ**
+- `queuedCount > 0` (есть задачи в очереди)
+
+**Когда отображается**:
+- Пользователь отправил модель на конвертацию
+- Сервер конвертирует другую модель
+- Модель этого пользователя ставится в очередь (`status="queued"`)
+
+### Ошибка (красный)
+
+**Условия**:
+- Ошибка при получении статуса очереди (сеть, таймаут, недоступность сервера)
+
+**Когда отображается**:
+- Не удалось получить статус очереди через API
+- Windows сервер недоступен
+- Ошибка сети или таймаут
+
+## Где применяется
+
+Это требование применяется **ВСЕГДА** в следующих местах:
+
+1. **Страница загрузки файлов**: `/app/datalab/upload`
+   - Компонент `ConversionStatusList` отображает индикатор нагрузки
+   - Индикатор размещается справа от заголовка "Мониторинг конвертации проекта"
+
+2. **API запросы**:
+   - Функция `getQueueStatus()` в `lib/api/upload.ts`
+   - Эндпоинт `/api/datalab/conversion/queue/status` в бэкенде
+
+3. **Обработка ошибок**:
+   - Ошибки авторизации игнорируются (редирект уже произошел)
+   - Ошибки получения статуса отображаются как "Ошибка" (красный цвет)
+
+## Чек-лист при добавлении/изменении индикатора нагрузки
+
+- [ ] Индикатор размещен справа от заголовка "Мониторинг конвертации проекта" на том же уровне по высоте
+- [ ] Статус обновляется каждые 5 секунд без анимации загрузки
+- [ ] Логика определения статуса правильная:
+  - Нормальная нагрузка: `windowsServerBusy === false` И `queuedCount === 0`
+  - Высокая нагрузка: `windowsServerBusy === true` ИЛИ `queuedCount > 0`
+  - Ошибка: ошибка получения статуса
+- [ ] Цвета соответствуют дизайн-системе:
+  - Зеленый: `text-emerald-300 bg-emerald-400/10 border-emerald-400/30`
+  - Желтый: `text-amber-300 bg-amber-400/10 border-amber-400/30`
+  - Красный: `text-red-300 bg-red-500/10 border-red-500/40`
+- [ ] URL эндпоинта БЕЗ trailing slash: `/conversion/queue/status`
+- [ ] Ошибки авторизации игнорируются (проверка `err.isAuthRedirect`)
+
+## История реализации
+
+**Дата**: 2024-11-30  
+**Задача**: Добавить отображение информации об очереди конвертации на странице "Загрузка файлов"  
+**Решение**: 
+- Добавлен эндпоинт `/api/datalab/conversion/queue/status` в бэкенд
+- Добавлена функция `getQueueStatus()` в `lib/api/upload.ts`
+- Добавлен индикатор нагрузки в компонент `ConversionStatusList`
+- Реализована логика обновления статуса каждые 5 секунд без анимации
+- Индикатор размещен справа от заголовка "Мониторинг конвертации проекта"
+- Исправлен URL эндпоинта (убрано trailing slash для совместимости с nginx)

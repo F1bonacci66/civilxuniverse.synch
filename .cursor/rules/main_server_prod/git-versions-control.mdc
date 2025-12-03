@@ -1,0 +1,462 @@
+---
+alwaysApply: true
+---
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Version Control & Git Standards
+
+**Description**: Version control standards and conventional commit message requirements for containerized applications. Apply when making commits, updating versions, managing releases, or tagging container images.
+
+**Key Focus Areas**: Semantic versioning, conventional commits, container versioning, release management, branch strategies
+
+## Version Management
+
+### Semantic Versioning
+- **Follow SemVer**: Use semantic versioning (MAJOR.MINOR.PATCH) for all releases
+- **Version Consistency**: Maintain version consistency across application code and container images
+- **Breaking Changes**: Increment MAJOR version for breaking changes
+- **New Features**: Increment MINOR version for new features
+- **Bug Fixes**: Increment PATCH version for bug fixes and patches
+
+### Container Image Versioning
+- **Tag Strategy**: Use semantic versions as primary tags (e.g., `v1.2.3`)
+- **Latest Tag**: Maintain `latest` tag for the most recent stable release
+- **Environment Tags**: Use environment-specific tags (e.g., `v1.2.3-dev`, `v1.2.3-staging`)
+- **Immutable Tags**: Never overwrite existing version tags
+- **SHA Tags**: Include git SHA in tags for traceability (e.g., `v1.2.3-a1b2c3d`)
+
+### Release Management
+- **Release Notes**: Generate release notes for all version increments
+- **Changelog**: Maintain comprehensive changelog with breaking changes highlighted
+- **Migration Guides**: Provide migration guides for breaking changes
+- **Rollback Documentation**: Document rollback procedures for each release
+
+## Conventional Commit Messages
+
+Use the Conventional Commits specification for all commit messages to enable automated tooling and clear history.
+
+### Commit Message Structure
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Commit Types
+- **feat**: New feature (correlates with MINOR in Semantic Versioning)
+- **fix**: Bug fix (correlates with PATCH in Semantic Versioning)
+- **docs**: Documentation only changes
+- **style**: Changes that do not affect the meaning of the code (white-space, formatting, etc.)
+- **refactor**: Code change that neither fixes a bug nor adds a feature
+- **perf**: Code change that improves performance
+- **test**: Adding missing tests or correcting existing tests
+- **build**: Changes that affect the build system or external dependencies (Docker, CI/CD)
+- **ci**: Changes to CI configuration files and scripts
+- **chore**: Other changes that don't modify src or test files
+- **revert**: Reverts a previous commit
+
+### Docker-Specific Scoping
+Use specific scopes for Docker and container-related changes:
+- **docker**: Docker configuration changes
+- **compose**: Docker Compose file changes
+- **deps**: Dependency updates
+
+### Breaking Changes
+- **Exclamation Mark**: Use `!` after type/scope to indicate breaking changes
+- **Footer Notation**: Use `BREAKING CHANGE:` in footer for detailed explanation
+- **Description**: Clearly describe the breaking change and migration path
+- **Version Impact**: Breaking changes trigger MAJOR version increment
+
+## Branch Strategy
+
+### Git Flow for Containerized Applications
+- **main**: Production-ready code, tagged releases
+- **develop**: Integration branch for ongoing development (optional)
+- **feature/***: Feature development branches
+- **hotfix/***: Critical bug fixes for production
+
+## Release Process
+
+### Pre-Release Checklist
+- Docker images build successfully
+- Documentation updated and complete
+- Breaking changes documented (if any)
+- Manual testing completed
+
+### Release Steps
+1. **Update Version**: Update version in all relevant files (if needed)
+2. **Build Images**: Build Docker images locally or on server
+3. **Update Documentation**: Ensure all documentation is current
+4. **Create Release Commit**: Commit release preparation changes
+5. **Tag Release**: Tag the release with version number (e.g., `v1.2.3`)
+6. **Push to Main**: Push commits and tags to main branch
+7. **Deploy**: Deploy to production server manually
+
+## Version Control Best Practices
+
+### Commit Hygiene
+- **Atomic Commits**: Make commits atomic and focused on single changes
+- **Clear Messages**: Write clear, descriptive commit messages using conventional commits
+- **Rebase vs Merge**: Use rebase for feature branches, merge for releases
+
+### Docker-Specific Practices
+- **Dockerfile Versioning**: Version Dockerfile changes explicitly
+- **Compose File Tracking**: Track docker-compose.yml changes carefully
+- **Environment Separation**: Keep environment-specific configs in separate files
+- **Secret Management**: Never commit secrets or sensitive configuration
+
+### Repository Management
+- **Main Branch**: Keep main branch stable and production-ready
+- **Branch Protection**: Consider protecting main branch from direct pushes (optional)
+- **Manual Deployment**: Deployments are performed manually from main branch
+
+## Saving Server Version to GitHub
+
+### Overview
+This process saves the current production version from the server to GitHub repository. It creates a backup snapshot of the actual running code on the server.
+
+**Use Case**: When you need to preserve the current server state in version control, especially after manual changes or when the server version differs from the repository.
+
+### Prerequisites
+- Access to Linux server (`95.163.230.61`)
+- GitHub repository: `https://github.com/F1bonacci66/civilx.univers.git`
+- GitHub Personal Access Token with `repo` scope
+- PuTTY installed (for automated connection) or SSH access
+
+### Server Structure
+The server has two main directories:
+- `/opt/civilx-backend` - Backend (FastAPI) application
+- `/opt/civilx-universe` - Frontend (Next.js) application source
+
+### Step-by-Step Process
+
+#### 1. Create Repository Structure on Server
+
+```bash
+# Connect to server
+ssh root@95.163.230.61
+
+# Create repository structure
+cd /opt
+mkdir -p civilx-website/backend civilx-website/universe/universe
+```
+
+#### 2. Copy Files from Production Directories
+
+**Backend files:**
+```bash
+cd /opt
+rsync -av \
+  --exclude='.env*' \
+  --exclude='*.log' \
+  --exclude='venv/' \
+  --exclude='__pycache__/' \
+  --exclude='data/' \
+  --exclude='cache/' \
+  --exclude='*.pyc' \
+  --exclude='.git' \
+  --exclude='storage/' \
+  civilx-backend/ civilx-website/backend/
+```
+
+**Frontend files:**
+```bash
+rsync -av \
+  --exclude='.env*' \
+  --exclude='node_modules/' \
+  --exclude='.next/' \
+  --exclude='.git' \
+  --exclude='*.log' \
+  civilx-universe/universe-src/ civilx-website/universe/universe/
+```
+
+#### 3. Create .gitignore Files
+
+**Root .gitignore:**
+```bash
+cd /opt/civilx-website
+cat > .gitignore << 'EOF'
+# Environment
+.env
+.env.local
+.env*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Storage
+storage/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+.next/
+out/
+build/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Docker
+.docker/
+EOF
+```
+
+**Backend .gitignore:**
+```bash
+cat > backend/.gitignore << 'EOF'
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Storage
+storage/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+EOF
+```
+
+**Frontend .gitignore:**
+```bash
+cat > universe/universe/.gitignore << 'EOF'
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# Next.js
+.next/
+out/
+build/
+
+# Production
+/build
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local env files
+.env*.local
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+EOF
+```
+
+#### 4. Remove Unnecessary Files
+
+```bash
+cd /opt/civilx-website
+
+# Remove excluded files from backend
+cd backend
+rm -rf storage/ data/ *.log venv/ __pycache__/ .env* cache/
+
+# Remove excluded files from frontend
+cd ../universe/universe
+rm -rf node_modules/ .next/ .env* *.log
+```
+
+#### 5. Initialize Git Repository
+
+```bash
+cd /opt/civilx-website
+
+# Initialize Git
+git init
+
+# Configure Git user
+git config user.name "CivilX Server"
+git config user.email "server@civilx.ru"
+
+# Rename branch to main
+git branch -M main
+```
+
+#### 6. Add Remote and Configure Authentication
+
+```bash
+# Add remote
+git remote add origin https://github.com/F1bonacci66/civilx.univers.git
+
+# Configure credential helper
+git config --global credential.helper store
+
+# Store GitHub token (replace with your token)
+echo "https://YOUR_GITHUB_TOKEN@github.com" > ~/.git-credentials
+```
+
+**Note**: Replace `YOUR_GITHUB_TOKEN` with your actual GitHub Personal Access Token. The token should have `repo` scope.
+
+#### 7. Add Files and Create Commit
+
+```bash
+cd /opt/civilx-website
+
+# Add all files
+git add .
+
+# Create commit with current date
+DATE=$(date +%Y-%m-%d)
+git commit -m "chore: сохранение актуальной версии с сервера $DATE"
+```
+
+#### 8. Push to GitHub
+
+```bash
+# Push to main branch
+git push https://YOUR_GITHUB_TOKEN@github.com/F1bonacci66/civilx.univers.git main
+```
+
+**Alternative using stored credentials:**
+```bash
+git push origin main
+```
+
+### Automated Script (PowerShell)
+
+For Windows users with PuTTY installed:
+
+```powershell
+# Add PuTTY to PATH
+$env:Path += ";C:\Program Files\PuTTY"
+
+# Server connection parameters
+$server = "95.163.230.61"
+$user = "root"
+$pass = "7LfOgcrTvZxbMR9Y"
+$hostKey = "ssh-ed25519 255 SHA256:gN8PzkTrFZUTD+sfsvJVTRXjg6up6VMQ8n2rAt6PnZk"
+$githubToken = "YOUR_GITHUB_TOKEN"
+
+# Execute full process on server
+plink -ssh "$user@$server" -pw $pass -hostkey $hostKey -batch @"
+cd /opt && \
+mkdir -p civilx-website/backend civilx-website/universe/universe && \
+rsync -av --exclude='.env*' --exclude='*.log' --exclude='venv/' --exclude='__pycache__/' --exclude='data/' --exclude='cache/' --exclude='*.pyc' --exclude='.git' --exclude='storage/' civilx-backend/ civilx-website/backend/ && \
+rsync -av --exclude='.env*' --exclude='node_modules/' --exclude='.next/' --exclude='.git' --exclude='*.log' civilx-universe/universe-src/ civilx-website/universe/universe/ && \
+cd civilx-website && \
+git init && \
+git config user.name 'CivilX Server' && \
+git config user.email 'server@civilx.ru' && \
+git branch -M main && \
+git remote add origin https://github.com/F1bonacci66/civilx.univers.git && \
+git add . && \
+DATE=\$(date +%Y-%m-%d) && \
+git commit -m \"chore: сохранение актуальной версии с сервера \$DATE\" && \
+git push https://${githubToken}@github.com/F1bonacci66/civilx.univers.git main
+"@
+```
+
+### Verification
+
+After pushing, verify the commit:
+
+```bash
+cd /opt/civilx-website
+git log --oneline -1
+git status
+git remote -v
+```
+
+### Important Notes
+
+- **Never commit sensitive data**: `.env` files, passwords, tokens, and secrets are excluded via `.gitignore`
+- **Storage and data directories**: Large files in `storage/` and `data/` are excluded to keep repository size manageable
+- **Dependencies**: `venv/`, `node_modules/`, and `.next/` are excluded as they can be regenerated
+- **Logs**: All log files are excluded from version control
+- **Backup before push**: If the repository already has content, consider creating a backup branch first
+
+### Troubleshooting
+
+**Issue**: `fatal: could not read Username for 'https://github.com'`
+- **Solution**: Ensure GitHub token is correctly stored in `~/.git-credentials` or use token in URL
+
+**Issue**: `Permission denied (publickey)`
+- **Solution**: Use HTTPS with token instead of SSH, or configure SSH keys on server
+
+**Issue**: Large files causing push to fail
+- **Solution**: Check `.gitignore` is working correctly, remove large files from Git history if needed
+
+**Issue**: Merge conflicts when pushing
+- **Solution**: Pull latest changes first: `git pull origin main --rebase`, resolve conflicts, then push
+
+This approach ensures consistent and traceable version management for the CivilX.Universe project.

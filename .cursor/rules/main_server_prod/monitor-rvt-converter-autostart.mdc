@@ -1,0 +1,298 @@
+---
+alwaysApply: true
+---
+
+# Автозапуск монитора RVT-CSV конвертации на prod сервере
+
+## ⚠️ КРИТИЧЕСКИ ВАЖНО: Скрипт monitor-rvt-converter.py должен работать всегда
+
+**ОБЯЗАТЕЛЬНО**: Скрипт `monitor-rvt-converter.py` должен автоматически запускаться при:
+- Перезагрузке сервера
+- Перезапуске Docker контейнеров (бэкенд/фронтенд)
+- Любых перезапусках системы
+- После остановки скрипта (автоматический перезапуск)
+
+**Расположение скрипта**: `/opt/civilx-universe/scripts/monitor-rvt-converter.py`
+
+---
+
+## Настройка systemd service для автозапуска
+
+### 1. Создание systemd service файла
+
+**Файл**: `/etc/systemd/system/monitor-rvt-converter.service`
+
+**Содержимое**:
+```ini
+[Unit]
+Description=RVT-CSV Converter Monitor Service
+Documentation=https://github.com/F1bonacci66/civilx.univers
+After=network.target docker.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/civilx-universe/scripts
+ExecStart=/usr/bin/python3 -u /opt/civilx-universe/scripts/monitor-rvt-converter.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/civilx-universe/scripts/monitor.log
+StandardError=append:/opt/civilx-universe/scripts/monitor.log
+
+# Ограничения ресурсов (опционально)
+MemoryLimit=512M
+CPUQuota=50%
+
+# Переменные окружения (если нужны)
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 2. Активация service
+
+**Команды для настройки**:
+```bash
+# Перезагрузить systemd для чтения нового service
+systemctl daemon-reload
+
+# Включить автозапуск при загрузке системы
+systemctl enable monitor-rvt-converter.service
+
+# Запустить service
+systemctl start monitor-rvt-converter.service
+
+# Проверить статус
+systemctl status monitor-rvt-converter.service
+
+# Просмотреть логи
+journalctl -u monitor-rvt-converter.service -f
+# Или
+tail -f /opt/civilx-universe/scripts/monitor.log
+```
+
+### 3. Проверка работы
+
+**Проверить, что service запущен**:
+```bash
+systemctl is-active monitor-rvt-converter.service
+# Должно вернуть: active
+
+systemctl is-enabled monitor-rvt-converter.service
+# Должно вернуть: enabled
+```
+
+**Проверить процесс**:
+```bash
+ps aux | grep monitor-rvt-converter | grep -v grep
+```
+
+**Проверить логи**:
+```bash
+# Логи systemd
+journalctl -u monitor-rvt-converter.service --since "1 hour ago"
+
+# Логи скрипта
+tail -f /opt/civilx-universe/scripts/monitor.log
+```
+
+---
+
+## Управление service
+
+### Запуск/остановка/перезапуск
+
+```bash
+# Запустить
+systemctl start monitor-rvt-converter.service
+
+# Остановить
+systemctl stop monitor-rvt-converter.service
+
+# Перезапустить
+systemctl restart monitor-rvt-converter.service
+
+# Перезагрузить конфигурацию (если изменили service файл)
+systemctl daemon-reload
+systemctl restart monitor-rvt-converter.service
+```
+
+### Просмотр статуса и логов
+
+```bash
+# Статус service
+systemctl status monitor-rvt-converter.service
+
+# Логи в реальном времени
+journalctl -u monitor-rvt-converter.service -f
+
+# Последние 100 строк логов
+journalctl -u monitor-rvt-converter.service -n 100
+
+# Логи за последний час
+journalctl -u monitor-rvt-converter.service --since "1 hour ago"
+
+# Логи скрипта (если пишутся в файл)
+tail -f /opt/civilx-universe/scripts/monitor.log
+```
+
+---
+
+## Интеграция с Docker Compose
+
+### Зависимость от Docker контейнеров
+
+Если нужно, чтобы монитор запускался только после запуска Docker контейнеров, можно добавить зависимость:
+
+**Обновленный service файл**:
+```ini
+[Unit]
+Description=RVT-CSV Converter Monitor Service
+Documentation=https://github.com/F1bonacci66/civilx.univers
+After=network.target docker.service
+Requires=docker.service
+Wants=network.target
+
+# Если нужно ждать запуска конкретных контейнеров
+# After=docker.service civilx-backend_backend_1.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/civilx-universe/scripts
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/bin/python3 -u /opt/civilx-universe/scripts/monitor-rvt-converter.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/civilx-universe/scripts/monitor.log
+StandardError=append:/opt/civilx-universe/scripts/monitor.log
+
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Примечание**: `ExecStartPre=/bin/sleep 10` дает Docker контейнерам время на запуск перед стартом монитора.
+
+---
+
+## Проверка после перезагрузки сервера
+
+**После перезагрузки сервера обязательно проверить**:
+
+```bash
+# 1. Проверить, что service запущен
+systemctl status monitor-rvt-converter.service
+
+# 2. Проверить, что процесс работает
+ps aux | grep monitor-rvt-converter | grep -v grep
+
+# 3. Проверить логи на ошибки
+journalctl -u monitor-rvt-converter.service --since "10 minutes ago" | grep -i error
+
+# 4. Проверить, что монитор проверяет сервис
+tail -n 20 /opt/civilx-universe/scripts/monitor.log
+```
+
+---
+
+## Устранение проблем
+
+### Service не запускается
+
+**Проблема**: `systemctl status` показывает `failed` или `inactive`
+
+**Решение**:
+```bash
+# Проверить логи ошибок
+journalctl -u monitor-rvt-converter.service -n 50
+
+# Проверить права на файл скрипта
+ls -l /opt/civilx-universe/scripts/monitor-rvt-converter.py
+chmod +x /opt/civilx-universe/scripts/monitor-rvt-converter.py
+
+# Проверить, что Python3 установлен
+which python3
+python3 --version
+
+# Проверить зависимости скрипта
+python3 -c "import requests; import subprocess; print('OK')"
+
+# Перезагрузить systemd и перезапустить
+systemctl daemon-reload
+systemctl restart monitor-rvt-converter.service
+```
+
+### Service запускается, но сразу падает
+
+**Проблема**: Service запускается, но сразу останавливается
+
+**Решение**:
+```bash
+# Проверить логи
+journalctl -u monitor-rvt-converter.service -n 100
+
+# Проверить логи скрипта
+tail -n 50 /opt/civilx-universe/scripts/monitor.log
+
+# Проверить, что скрипт может запуститься вручную
+cd /opt/civilx-universe/scripts
+python3 -u monitor-rvt-converter.py
+# Если есть ошибки - исправить их
+```
+
+### Service не перезапускается автоматически
+
+**Проблема**: Service падает и не перезапускается
+
+**Решение**:
+```bash
+# Проверить настройки Restart в service файле
+cat /etc/systemd/system/monitor-rvt-converter.service | grep Restart
+
+# Должно быть:
+# Restart=always
+# RestartSec=10
+
+# Если нет - обновить service файл и перезагрузить
+systemctl daemon-reload
+systemctl restart monitor-rvt-converter.service
+```
+
+---
+
+## Чек-лист при настройке
+
+- [ ] Service файл создан: `/etc/systemd/system/monitor-rvt-converter.service`
+- [ ] Скрипт существует и исполняемый: `/opt/civilx-universe/scripts/monitor-rvt-converter.py`
+- [ ] Зависимости установлены: `python3`, `requests`, `sshpass`, `openssh-client`
+- [ ] Service включен: `systemctl enable monitor-rvt-converter.service`
+- [ ] Service запущен: `systemctl start monitor-rvt-converter.service`
+- [ ] Service активен: `systemctl is-active monitor-rvt-converter.service` → `active`
+- [ ] Service включен в автозапуск: `systemctl is-enabled monitor-rvt-converter.service` → `enabled`
+- [ ] Процесс работает: `ps aux | grep monitor-rvt-converter | grep -v grep`
+- [ ] Логи пишутся: `tail -f /opt/civilx-universe/scripts/monitor.log`
+- [ ] Проверка после перезагрузки: перезагрузить сервер и проверить, что service запустился автоматически
+
+---
+
+## Важные замечания
+
+1. **Service должен быть включен в автозапуск**: `systemctl enable monitor-rvt-converter.service`
+2. **Restart=always**: Service автоматически перезапустится при падении
+3. **Логи**: Логи пишутся и в systemd journal, и в файл `/opt/civilx-universe/scripts/monitor.log`
+4. **Зависимости**: Service запускается после `network.target` и `docker.service`
+5. **Проверка после изменений**: После любых изменений в service файле выполнить `systemctl daemon-reload`
+
+---
+
+## История создания
+
+**Дата**: 2024-12-03  
+**Задача**: Обеспечить автозапуск скрипта `monitor-rvt-converter.py` при перезагрузке сервера и перезапуске Docker контейнеров  
+**Решение**: Создан systemd service с автозапуском и автоматическим перезапуском при падении
+
+---
