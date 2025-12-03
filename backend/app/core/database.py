@@ -6,35 +6,52 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 from app.core.config import settings
-import os
+import sys
 
-# Определяем DATABASE_URL - используем SQLite если PostgreSQL недоступен
+# Определяем DATABASE_URL - ОБЯЗАТЕЛЬНО PostgreSQL
 database_url = settings.DATABASE_URL
 
-# Если DATABASE_URL указывает на PostgreSQL, но он недоступен, используем SQLite
-if database_url.startswith("postgresql://"):
-    try:
-        # Пробуем подключиться к PostgreSQL
-        test_engine = create_engine(database_url, poolclass=NullPool, connect_args={"connect_timeout": 2})
-        test_engine.connect()
-        test_engine.dispose()
-    except Exception:
-        # Если PostgreSQL недоступен, переключаемся на SQLite
-        print("⚠️  PostgreSQL недоступен, используем SQLite для разработки")
-        # Создаем путь к базе данных в корне backend/
-        backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        db_dir = os.path.join(backend_dir, "data")
-        os.makedirs(db_dir, exist_ok=True)
-        db_path = os.path.join(db_dir, "civilx_universe.db")
-        database_url = f"sqlite:///{db_path}"
-        print(f"📁 SQLite база данных: {db_path}")
+# КРИТИЧЕСКИ ВАЖНО: Universe использует ТОЛЬКО PostgreSQL, SQLite НЕ поддерживается
+if not database_url.startswith("postgresql://"):
+    print("❌ ОШИБКА: DATABASE_URL должен указывать на PostgreSQL!")
+    print(f"   Текущий DATABASE_URL: {database_url}")
+    print("   Universe не поддерживает SQLite. Проверьте настройки в .env файле.")
+    sys.exit(1)
 
-# Создаем engine
+# Проверяем подключение к PostgreSQL при старте
+try:
+    print("🔌 Проверяем подключение к PostgreSQL...")
+    test_engine = create_engine(database_url, poolclass=NullPool, connect_args={"connect_timeout": 5})
+    test_conn = test_engine.connect()
+    test_conn.close()
+    test_engine.dispose()
+    print("✅ Подключение к PostgreSQL успешно")
+except Exception as e:
+    print(f"❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось подключиться к PostgreSQL!")
+    # Маскируем пароль в выводе
+    masked_url = database_url
+    if "@" in database_url:
+        parts = database_url.split("@")
+        user_pass = parts[0].split("//")[1] if "//" in parts[0] else parts[0]
+        if ":" in user_pass:
+            user = user_pass.split(":")[0]
+            masked_url = database_url.replace(user_pass, f"{user}:***")
+    print(f"   DATABASE_URL: {masked_url}")
+    print(f"   Ошибка: {type(e).__name__}: {e}")
+    print("   Universe требует PostgreSQL для работы. Проверьте:")
+    print("   1. PostgreSQL запущен и доступен")
+    print("   2. DATABASE_URL в .env файле указан правильно")
+    print("   3. Пользователь и пароль корректны")
+    print("   4. База данных существует")
+    print("   5. pg_hba.conf разрешает подключения")
+    sys.exit(1)
+
+# Создаем engine для PostgreSQL
 engine = create_engine(
     database_url,
-    poolclass=NullPool,  # Используем NullPool для упрощения
-    echo=False,  # Установите в True для отладки SQL запросов
-    connect_args={"check_same_thread": False} if database_url.startswith("sqlite") else {}
+    poolclass=NullPool,
+    echo=False,
+    connect_args={"connect_timeout": 5}
 )
 
 # Создаем сессию
@@ -51,15 +68,16 @@ async def init_db():
     from app.models import project  # noqa: F401
     from app.models import upload  # noqa: F401
     from app.models import pivot  # noqa: F401
-    
-    # Создаем таблицы, если используем SQLite или если нужно
+
     # Для PostgreSQL таблицы создаются вручную через миграции
+    # Проверяем, что таблицы существуют
     try:
-        print("📦 Проверяем наличие таблиц в текущей БД...")
+        print("📦 Проверяем наличие таблиц в PostgreSQL...")
+        # Просто проверяем подключение - таблицы должны быть созданы через миграции
         Base.metadata.create_all(bind=engine)
         print("✅ Таблицы готовы")
     except Exception as e:
-        print(f"❌ Не удалось создать таблицы автоматически: {e}")
+        print(f"❌ Не удалось проверить таблицы: {e}")
         raise
 
 
@@ -70,4 +88,3 @@ def get_db():
         yield db
     finally:
         db.close()
-

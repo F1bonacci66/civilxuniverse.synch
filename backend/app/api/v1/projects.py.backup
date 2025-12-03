@@ -72,16 +72,10 @@ async def create_project(
     # Генерируем slug если не указан
     slug = project_data.slug or generate_slug(project_data.name)
     
-    # Проверяем уникальность slug и добавляем суффикс при конфликте
-    base_slug = slug
-    counter = 1
-    while True:
-        existing_project = db.query(Project).filter(Project.slug == slug).first()
-        if not existing_project:
-            break
-        # Если slug уже существует, добавляем суффикс
-        counter += 1
-        slug = f"{base_slug}-{counter}"
+    # Проверяем уникальность slug
+    existing_project = db.query(Project).filter(Project.slug == slug).first()
+    if existing_project:
+        raise HTTPException(status_code=400, detail=f"Проект с slug '{slug}' уже существует")
     
     # Создаем проект
     project = Project(
