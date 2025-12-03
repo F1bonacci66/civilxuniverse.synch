@@ -586,7 +586,7 @@ git config --global credential.helper store
 echo "https://ghp_YOUR_TOKEN@github.com" > ~/.git-credentials
 ```
 
-**GitHub токен**: `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`
+**GitHub токен**: `ghp_YOUR_TOKEN_HERE` (хранится локально, не коммитится в репозиторий)
 
 ---
 
