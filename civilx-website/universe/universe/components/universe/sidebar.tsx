@@ -10,8 +10,6 @@ import {
   Plus,
   Database,
   BarChart3,
-  FileBarChart,
-  CheckSquare,
   Upload,
   GitBranch,
   X,
@@ -19,6 +17,8 @@ import {
   Edit2,
   Trash2,
   Check,
+  Box,
+  Loader2,
 } from 'lucide-react'
 import { mockProjects } from '@/lib/mock-data'
 import { cn } from '@/lib/utils'
@@ -34,6 +34,9 @@ import {
   type Project, 
   type ProjectVersion 
 } from '@/lib/api/projects'
+import { getFileUploads } from '@/lib/api/upload'
+import { getViewerStatus } from '@/lib/api/viewer'
+import type { FileUpload } from '@/lib/types/upload'
 import { useToast } from '@/components/ui/toast'
 
 const getProjectRouteId = (project: Project) => project.shortId?.toString() ?? project.id
@@ -42,9 +45,10 @@ const getVersionRouteId = (version: ProjectVersion) => version.shortId?.toString
 interface SidebarProps {
   projectId?: string
   versionId?: string
+  currentApp?: string
 }
 
-export function Sidebar({ projectId, versionId }: SidebarProps) {
+export function Sidebar({ projectId, versionId, currentApp = 'datalab' }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [expandedProjects, setExpandedProjects] = useState<string[]>([])
@@ -53,6 +57,10 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
   const [projectVersions, setProjectVersions] = useState<Record<string, ProjectVersion[]>>({})
   const [loadingVersions, setLoadingVersions] = useState<Record<string, boolean>>({})
   const [isLoadingProjects, setIsLoadingProjects] = useState(true)
+  
+  // Состояния для моделей с XKT (для 3D Viewer)
+  const [viewerModels, setViewerModels] = useState<Record<string, FileUpload[]>>({}) // key: versionId
+  const [loadingViewerModels, setLoadingViewerModels] = useState<Record<string, boolean>>({})
   const [showCreateProjectModal, setShowCreateProjectModal] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectDescription, setNewProjectDescription] = useState('')
@@ -121,6 +129,95 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
       prev.includes(versionKey) ? prev : [...prev, versionKey]
     )
   }, [projectId, versionId, projects, projectVersions])
+
+  // Загрузка моделей с XKT для 3D Viewer
+  const loadViewerModels = async (projectId: string, versionId: string) => {
+    const versionKey = `${projectId}-${versionId}`
+    
+    // Проверяем, не загружаются ли уже модели для этой версии
+    if (loadingViewerModels[versionKey]) {
+      console.log('[Sidebar] Модели уже загружаются для версии:', versionKey)
+      return
+    }
+    
+    try {
+      console.log('[Sidebar] Начало загрузки моделей для версии:', versionKey)
+      setLoadingViewerModels((prev) => ({ ...prev, [versionKey]: true }))
+      
+      // Получаем все файлы для версии
+      const files = await getFileUploads(projectId, versionId)
+      console.log('[Sidebar] Получено файлов:', files.length, 'для версии:', versionKey)
+      
+      // Фильтруем RVT/IFC файлы
+      const rvtIfcFiles = files.filter(
+        (f) => f.fileType === 'RVT' || f.fileType === 'IFC'
+      )
+      console.log('[Sidebar] RVT/IFC файлов:', rvtIfcFiles.length)
+      
+      // Проверяем каждый файл на наличие XKT
+      const modelsWithXKT: FileUpload[] = []
+      for (const file of rvtIfcFiles) {
+        try {
+          const status = await getViewerStatus(file.id)
+          console.log('[Sidebar] Статус XKT для файла', file.id, ':', status.has_xkt)
+          if (status.has_xkt) {
+            modelsWithXKT.push(file)
+          }
+        } catch (err: any) {
+          // Игнорируем ошибки авторизации - редирект уже произошел
+          if (err.isAuthRedirect) {
+            return
+          }
+          // Продолжаем проверку других файлов
+          console.warn(`[Sidebar] Не удалось проверить статус XKT для файла ${file.id}:`, err)
+        }
+      }
+      
+      console.log('[Sidebar] Моделей с XKT найдено:', modelsWithXKT.length, 'для версии:', versionKey)
+      setViewerModels((prev) => ({ ...prev, [versionKey]: modelsWithXKT }))
+    } catch (err: any) {
+      console.error('[Sidebar] Ошибка загрузки моделей с XKT:', err)
+      // Игнорируем ошибки авторизации - редирект уже произошел
+      if (err.isAuthRedirect) {
+        return
+      }
+      setViewerModels((prev) => ({ ...prev, [versionKey]: [] }))
+    } finally {
+      setLoadingViewerModels((prev => {
+        const newState = { ...prev }
+        delete newState[versionKey]
+        return newState
+      }))
+    }
+  }
+
+  // Автоматическая загрузка моделей с XKT, когда версия развернута и currentApp === 'viewer'
+  useEffect(() => {
+    if (currentApp !== 'viewer' || !projectId || !versionId || projects.length === 0) {
+      return
+    }
+    
+    // Находим проект и версию по route ID
+    const matchedProject = projects.find((p) => getProjectRouteId(p) === projectId)
+    if (!matchedProject) return
+    
+    const versions = projectVersions[matchedProject.id]
+    if (!versions) return
+    
+    const matchedVersion = versions.find((v) => getVersionRouteId(v) === versionId)
+    if (!matchedVersion) return
+    
+    // Проверяем, развернута ли версия
+    if (!isVersionExpanded(matchedVersion.id)) {
+      return
+    }
+    
+    const versionKey = `${projectId}-${versionId}`
+    // Загружаем модели только если они еще не загружены
+    if (!viewerModels[versionKey] && !loadingViewerModels[versionKey]) {
+      loadViewerModels(projectId, versionId)
+    }
+  }, [currentApp, projectId, versionId, projects, projectVersions, expandedVersions, viewerModels, loadingViewerModels])
 
   const loadProjects = async () => {
     try {
@@ -252,11 +349,44 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
   }
 
   const toggleVersion = (versionId: string) => {
+    const isExpanding = !expandedVersions.includes(versionId)
+    
     setExpandedVersions((prev) =>
       prev.includes(versionId)
         ? prev.filter((id) => id !== versionId)
         : [...prev, versionId]
     )
+    
+    // Если разворачиваем версию и currentApp === 'viewer', загружаем модели
+    if (isExpanding && currentApp === 'viewer') {
+      // Находим проект и версию по их ID
+      let foundProject: Project | undefined
+      let foundVersion: ProjectVersion | undefined
+      
+      for (const project of projects) {
+        const versions = projectVersions[project.id]
+        if (versions) {
+          const version = versions.find((v) => v.id === versionId)
+          if (version) {
+            foundProject = project
+            foundVersion = version
+            break
+          }
+        }
+      }
+      
+      if (foundProject && foundVersion) {
+        const projectRoute = getProjectRouteId(foundProject)
+        const versionRoute = getVersionRouteId(foundVersion)
+        const versionKey = `${projectRoute}-${versionRoute}`
+        
+        // Загружаем модели только если они еще не загружены
+        if (!viewerModels[versionKey] && !loadingViewerModels[versionKey]) {
+          console.log('[Sidebar] Загрузка моделей для версии:', versionKey)
+          loadViewerModels(projectRoute, versionRoute)
+        }
+      }
+    }
   }
 
   const isProjectExpanded = (projectId: string) => expandedProjects.includes(projectId)
@@ -435,24 +565,6 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
       path:
         projectId && versionId
           ? `/app/datalab/project/${projectId}/version/${versionId}/pivot`
-          : undefined,
-    },
-    {
-      id: 'reports',
-      name: 'Отчёты / Спецификации',
-      icon: FileBarChart,
-      path:
-        projectId && versionId
-          ? `/app/datalab/project/${projectId}/version/${versionId}/reports`
-          : undefined,
-    },
-    {
-      id: 'checks',
-      name: 'Проверки параметров',
-      icon: CheckSquare,
-      path:
-        projectId && versionId
-          ? `/app/datalab/project/${projectId}/version/${versionId}/checks`
           : undefined,
     },
   ]
@@ -680,54 +792,100 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
 
                                 {isVersionExpanded(version.id) && (
                                   <div className="ml-4 mt-1 space-y-1 border-l border-[rgba(255,255,255,0.1)] pl-4">
-                                    <Link
-                                      href={`/app/datalab/project/${projectRoute}/version/${versionRoute}/data`}
-                                      className={cn(
-                                        'flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all duration-200',
-                                        pathname === `/app/datalab/project/${projectRoute}/version/${versionRoute}/data`
-                                          ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
-                                          : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
-                                      )}
-                                    >
-                                      <Database className="w-4 h-4" />
-                                      <span className="text-sm font-medium">Таблица данных</span>
-                                    </Link>
-                                    <Link
-                                      href={`/app/datalab/project/${projectRoute}/version/${versionRoute}/pivot`}
-                                      className={cn(
-                                        'flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all duration-200',
-                                        pathname === `/app/datalab/project/${projectRoute}/version/${versionRoute}/pivot`
-                                          ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
-                                          : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
-                                      )}
-                                    >
-                                      <BarChart3 className="w-4 h-4" />
-                                      <span className="text-sm font-medium">Pivot-аналитика</span>
-                                    </Link>
-                                    <Link
-                                      href={`/app/datalab/project/${projectRoute}/version/${versionRoute}/reports`}
-                                      className={cn(
-                                        'flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all duration-200',
-                                        pathname === `/app/datalab/project/${projectRoute}/version/${versionRoute}/reports`
-                                          ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
-                                          : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
-                                      )}
-                                    >
-                                      <FileBarChart className="w-4 h-4" />
-                                      <span className="text-sm font-medium">Отчёты</span>
-                                    </Link>
-                                    <Link
-                                      href={`/app/datalab/project/${projectRoute}/version/${versionRoute}/checks`}
-                                      className={cn(
-                                        'flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all duration-200',
-                                        pathname === `/app/datalab/project/${projectRoute}/version/${versionRoute}/checks`
-                                          ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
-                                          : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
-                                      )}
-                                    >
-                                      <CheckSquare className="w-4 h-4" />
-                                      <span className="text-sm font-medium">Проверки</span>
-                                    </Link>
+                                    {currentApp === 'viewer' ? (
+                                      // Для 3D Viewer показываем модели с XKT
+                                      (() => {
+                                        const versionKey = `${projectRoute}-${versionRoute}`
+                                        const models = viewerModels[versionKey] || []
+                                        const isLoading = loadingViewerModels[versionKey]
+                                        
+                                        // Логирование для отладки
+                                        console.log('[Sidebar] Отображение моделей для версии:', versionKey, {
+                                          currentApp,
+                                          modelsCount: models.length,
+                                          isLoading,
+                                          allViewerModels: Object.keys(viewerModels),
+                                        })
+                                        
+                                        if (isLoading) {
+                                          return (
+                                            <div className="flex items-center gap-2 px-3 py-2 text-[#999]">
+                                              <Loader2 className="w-4 h-4 animate-spin" />
+                                              <span className="text-sm">Загрузка моделей...</span>
+                                            </div>
+                                          )
+                                        }
+                                        
+                                        if (models.length === 0) {
+                                          return (
+                                            <div className="px-3 py-2 text-[#999] text-sm">
+                                              Нет доступных моделей
+                                            </div>
+                                          )
+                                        }
+                                        
+                                        return models.map((model) => {
+                                          // Всегда используем file_upload_id (model.id) для формирования пути
+                                          // Это гарантирует, что будет загружен правильный XKT файл
+                                          const modelId = model.id
+                                          const viewerPath = `/app/datalab/project/${projectRoute}/version/${versionRoute}/model/${modelId}/viewer`
+                                          const isActive = pathname === viewerPath
+                                          
+                                          console.log('[Sidebar] Создание ссылки на модель:', {
+                                            modelId,
+                                            fileUploadId: model.id,
+                                            modelName: model.originalFilename,
+                                            viewerPath,
+                                          })
+                                          
+                                          return (
+                                            <Link
+                                              key={model.id}
+                                              href={viewerPath}
+                                              className={cn(
+                                                'flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all duration-200',
+                                                isActive
+                                                  ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
+                                                  : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
+                                              )}
+                                            >
+                                              <Box className="w-4 h-4" />
+                                              <span className="text-sm font-medium truncate">
+                                                {model.originalFilename || 'Модель'}
+                                              </span>
+                                            </Link>
+                                          )
+                                        })
+                                      })()
+                                    ) : (
+                                      // Для DataLab показываем вкладки
+                                      <>
+                                        <Link
+                                          href={`/app/datalab/project/${projectRoute}/version/${versionRoute}/data`}
+                                          className={cn(
+                                            'flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all duration-200',
+                                            pathname === `/app/datalab/project/${projectRoute}/version/${versionRoute}/data`
+                                              ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
+                                              : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
+                                          )}
+                                        >
+                                          <Database className="w-4 h-4" />
+                                          <span className="text-sm font-medium">Таблица данных</span>
+                                        </Link>
+                                        <Link
+                                          href={`/app/datalab/project/${projectRoute}/version/${versionRoute}/pivot`}
+                                          className={cn(
+                                            'flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all duration-200',
+                                            pathname === `/app/datalab/project/${projectRoute}/version/${versionRoute}/pivot`
+                                              ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
+                                              : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
+                                          )}
+                                        >
+                                          <BarChart3 className="w-4 h-4" />
+                                          <span className="text-sm font-medium">Pivot-аналитика</span>
+                                        </Link>
+                                      </>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -995,35 +1153,6 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
           </Link>
         </div>
 
-        {/* Навигация внутри DataLab (показывается только при выбранной версии) */}
-        {versionId && (
-          <div className="border-t border-[rgba(255,255,255,0.1)] pt-4">
-            <h2 className="text-sm font-semibold text-white uppercase tracking-wider mb-3">
-              DataLab
-            </h2>
-            <nav className="space-y-1">
-              {datalabTabs.map((tab) => {
-                const Icon = tab.icon
-                const isActive = pathname === tab.path
-                return (
-                  <Link
-                    key={tab.id}
-                    href={tab.path || '#'}
-                    className={cn(
-                      'flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-200',
-                      isActive
-                        ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
-                        : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
-                    )}
-                  >
-                    <Icon className="w-4 h-4" />
-                    <span className="text-sm font-medium">{tab.name}</span>
-                  </Link>
-                )
-              })}
-            </nav>
-          </div>
-        )}
       </div>
 
       {/* Рендеринг меню через Portal в body для отображения поверх всего контента */}
