@@ -19,6 +19,8 @@ services:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-/api/datalab}
       - INTERNAL_API_URL=${INTERNAL_API_URL:-http://172.17.0.1:8000/api/datalab}
       - DOCKER_CONTAINER=${DOCKER_CONTAINER:-true}
+      # Явно передаем INTERNAL_API_URL из .env файла
+      - INTERNAL_API_URL
     volumes:
       # Монтируем исходный код для hot reload
       - ./app:/app/app
@@ -47,4 +49,5 @@ networks:
   app-network:
     driver: bridge
     name: civilx-universe-network-dev
+
 
