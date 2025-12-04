@@ -57,6 +57,8 @@ export const Viewer3D = forwardRef<Viewer3DRef, Viewer3DProps>(
     const [metadata, setMetadata] = useState<ViewerMetadata | null>(null)
 
   useEffect(() => {
+    // Проверяем, что мы на клиенте
+    if (typeof window === 'undefined') return
     if (!containerRef.current) return
 
     let isMounted = true
@@ -66,7 +68,7 @@ export const Viewer3D = forwardRef<Viewer3DRef, Viewer3DProps>(
         setLoading(true)
         setError(null)
 
-        // Динамически импортируем Xeokit SDK
+        // Динамически импортируем Xeokit SDK только на клиенте
         const { Viewer, XKTLoaderPlugin } = await import('@xeokit/xeokit-sdk')
 
         // Создаем контейнер для viewer
