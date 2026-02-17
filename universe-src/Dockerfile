@@ -4,7 +4,7 @@ FROM node:18-alpine AS builder
 WORKDIR /app
 
 # Аргумент сборки для API URL (можно переопределить при сборке)
-ARG NEXT_PUBLIC_API_URL=https://api.civilx.ru/api/datalab
+ARG NEXT_PUBLIC_API_URL=/api/datalab
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Устанавливаем зависимости для сборки (включая dev)
