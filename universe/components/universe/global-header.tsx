@@ -34,13 +34,13 @@ export function GlobalHeader({ currentApp = 'datalab' }: GlobalHeaderProps) {
           <Link href="/" className="flex items-center gap-3">
             <div className="text-xl font-bold text-white">CivilX.Universe</div>
           </Link>
-          {currentAppData && (
+          {currentAppData ? (
             <div className="flex items-center gap-2 pl-6 border-l border-[rgba(255,255,255,0.1)]">
               <div className="text-lg font-semibold text-white">
                 {currentAppData.displayName}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
 
         {/* Поиск и App Switcher */}
@@ -158,6 +158,7 @@ export function GlobalHeader({ currentApp = 'datalab' }: GlobalHeaderProps) {
           }}
         />
       )}
+
     </header>
   )
 }

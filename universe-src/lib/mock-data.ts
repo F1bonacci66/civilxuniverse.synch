@@ -49,6 +49,14 @@ export const universeApps: UniverseApp[] = [
     status: 'active',
     path: '/app/datalab',
   },
+  {
+    id: 'ai-classifier',
+    name: 'СВОР Классификатор',
+    displayName: 'СВОР Классификатор',
+    description: 'Автоматическая классификация элементов по СВОР',
+    status: 'active',
+    path: '/app/ai-classifier',
+  },
 ]
 
 export const mockProjects: Project[] = [

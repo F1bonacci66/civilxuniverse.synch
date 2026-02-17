@@ -7,9 +7,12 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   Folder,
   ChevronRight,
+  ChevronLeft,
   Plus,
   Database,
   BarChart3,
+  FileBarChart,
+  CheckSquare,
   Upload,
   GitBranch,
   X,
@@ -17,21 +20,30 @@ import {
   Edit2,
   Trash2,
   Check,
+  Box,
+  AlertCircle,
 } from 'lucide-react'
 import { mockProjects } from '@/lib/mock-data'
 import { cn } from '@/lib/utils'
-import { 
-  getProjects, 
-  createProject, 
-  getProjectVersions, 
+import {
+  getProjects,
+  createProject,
+  getProjectVersions,
   createProjectVersion,
   updateProject,
   deleteProject,
   updateProjectVersion,
   deleteProjectVersion,
-  type Project, 
-  type ProjectVersion 
+  type Project,
+  type ProjectVersion
 } from '@/lib/api/projects'
+import {
+  getCachedProjects,
+  setCachedProjects,
+  clearProjectsCache,
+} from '@/lib/cache/projects-cache'
+import { getFileUploads } from '@/lib/api/upload'
+import type { FileUpload } from '@/lib/types/upload'
 import { useToast } from '@/components/ui/toast'
 
 const getProjectRouteId = (project: Project) => project.shortId?.toString() ?? project.id
@@ -40,9 +52,10 @@ const getVersionRouteId = (version: ProjectVersion) => version.shortId?.toString
 interface SidebarProps {
   projectId?: string
   versionId?: string
+  currentApp?: string
 }
 
-export function Sidebar({ projectId, versionId }: SidebarProps) {
+export function Sidebar({ projectId, versionId, currentApp = 'datalab' }: SidebarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const [expandedProjects, setExpandedProjects] = useState<string[]>([])
@@ -120,15 +133,62 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
     )
   }, [projectId, versionId, projects, projectVersions])
 
-  const loadProjects = async () => {
+  const loadProjects = async (forceRefresh = false) => {
     try {
       setIsLoadingProjects(true)
+      
+      // Проверяем кэш перед загрузкой (если не принудительное обновление)
+      if (!forceRefresh) {
+        const cachedProjects = getCachedProjects()
+        if (cachedProjects && cachedProjects.length > 0) {
+          console.log('📦 Используем кэшированные проекты:', cachedProjects.length)
+          setProjects(cachedProjects)
+          setIsLoadingProjects(false)
+          
+          // Загружаем свежие данные в фоне (без блокировки UI)
+          getProjects()
+            .then((freshProjects) => {
+              setProjects(freshProjects)
+              setCachedProjects(freshProjects)
+              console.log('✅ Проекты обновлены из API:', freshProjects.length)
+            })
+            .catch((err: any) => {
+              console.error('Ошибка фоновой загрузки проектов:', err)
+              // Очищаем кэш при ошибке авторизации
+              if (err.isAuthRedirect) {
+                clearProjectsCache()
+              }
+              // Игнорируем другие ошибки фоновой загрузки - используем кэш
+            })
+          return
+        }
+      }
+      
+      // Загружаем проекты из API
+      console.log('📡 Загрузка проектов из API...')
       const projectsData = await getProjects()
       setProjects(projectsData)
-    } catch (err) {
+      setCachedProjects(projectsData)
+      console.log('✅ Проекты загружены:', projectsData.length)
+    } catch (err: any) {
       console.error('Ошибка загрузки проектов:', err)
-      // В случае ошибки используем mock данные
-      setProjects(mockProjects as any)
+      
+      // Игнорируем ошибки авторизации - редирект уже произошел
+      if (err.isAuthRedirect) {
+        // Очищаем кэш при ошибке авторизации
+        clearProjectsCache()
+        return
+      }
+      
+      // Пытаемся использовать кэш в случае ошибки
+      const cachedProjects = getCachedProjects()
+      if (cachedProjects && cachedProjects.length > 0) {
+        console.log('⚠️ Используем кэш из-за ошибки загрузки')
+        setProjects(cachedProjects)
+      } else {
+        // В случае ошибки используем mock данные
+        setProjects(mockProjects as any)
+      }
     } finally {
       setIsLoadingProjects(false)
     }
@@ -148,8 +208,9 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
         description: newProjectDescription.trim() || undefined,
       })
       
-      // Обновляем список проектов
-      await loadProjects()
+      // Очищаем кэш и обновляем список проектов
+      clearProjectsCache()
+      await loadProjects(true)
       
       // Разворачиваем созданный проект и загружаем его версии
       setExpandedProjects((prev) => [...prev, newProject.id])
@@ -249,7 +310,9 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
     }
   }
 
-  const toggleVersion = (versionId: string) => {
+  const toggleVersion = async (versionId: string) => {
+    const isExpanding = !expandedVersions.includes(versionId)
+    
     setExpandedVersions((prev) =>
       prev.includes(versionId)
         ? prev.filter((id) => id !== versionId)
@@ -327,7 +390,8 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
       if (editingId.type === 'project') {
         await updateProject(editingId.id, { name: editingName.trim() })
         showToast('Проект успешно переименован', 'success')
-        await loadProjects()
+        clearProjectsCache()
+        await loadProjects(true)
       } else {
         const project = projects.find((p) => 
           projectVersions[p.id]?.some((v) => v.id === editingId.id)
@@ -387,7 +451,8 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
           router.push('/app/datalab')
         }
         
-        await loadProjects()
+        clearProjectsCache()
+        await loadProjects(true)
       } else {
         if (!showDeleteModal.projectId) return
         
@@ -415,6 +480,27 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
       setIsDeleting(false)
     }
   }
+
+  const datalabTabs = [
+    {
+      id: 'data',
+      name: 'Таблица данных',
+      icon: Database,
+      path:
+        projectId && versionId
+          ? `/app/datalab/project/${projectId}/version/${versionId}/data`
+          : undefined,
+    },
+    {
+      id: 'pivot',
+      name: 'Сводный расчет',
+      icon: BarChart3,
+      path:
+        projectId && versionId
+          ? `/app/datalab/project/${projectId}/version/${versionId}/pivot`
+          : undefined,
+    },
+  ]
 
   return (
     <aside className="fixed left-0 top-16 bottom-0 w-64 bg-[rgba(0,0,0,0.6)] backdrop-blur-[10px] border-r border-[rgba(255,255,255,0.1)] overflow-y-auto">
@@ -637,7 +723,7 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
                                   )}
                                 </div>
 
-                                {isVersionExpanded(version.id) && (
+                                {isVersionExpanded(version.id) && currentApp === 'datalab' && (
                                   <div className="ml-4 mt-1 space-y-1 border-l border-[rgba(255,255,255,0.1)] pl-4">
                                     <Link
                                       href={`/app/datalab/project/${projectRoute}/version/${versionRoute}/data`}
@@ -912,23 +998,25 @@ export function Sidebar({ projectId, versionId }: SidebarProps) {
         )}
 
         {/* Раздел Загрузка */}
-        <div className="border-t border-[rgba(255,255,255,0.1)] pt-4 mb-6">
-          <h2 className="text-sm font-semibold text-white uppercase tracking-wider mb-3">
-            Загрузка
-          </h2>
-          <Link
-            href="/app/datalab/upload"
-            className={cn(
-              'flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-200',
-              pathname === '/app/datalab/upload'
-                ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
-                : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
-            )}
-          >
-            <Upload className="w-4 h-4" />
-            <span className="text-sm font-medium">Загрузка файлов</span>
-          </Link>
-        </div>
+        {currentApp === 'datalab' && (
+          <div className="border-t border-[rgba(255,255,255,0.1)] pt-4 mb-6">
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider mb-3">
+              Загрузка
+            </h2>
+            <Link
+              href="/app/datalab/upload"
+              className={cn(
+                'flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all duration-200',
+                pathname === '/app/datalab/upload'
+                  ? 'bg-[rgba(20,184,166,0.1)] text-primary-500'
+                  : 'text-[#ccc] hover:bg-[rgba(20,184,166,0.05)] hover:text-primary-400'
+              )}
+            >
+              <Upload className="w-4 h-4" />
+              <span className="text-sm font-medium">Загрузка файлов</span>
+            </Link>
+          </div>
+        )}
       </div>
 
       {/* Рендеринг меню через Portal в body для отображения поверх всего контента */}

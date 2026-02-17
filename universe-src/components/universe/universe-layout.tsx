@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { usePathname } from 'next/navigation'
 import { GlobalHeader } from './global-header'
@@ -12,9 +12,17 @@ interface UniverseLayoutProps {
 
 export function UniverseLayout({
   children,
-  currentApp = 'datalab',
+  currentApp: propCurrentApp,
 }: UniverseLayoutProps) {
   const pathname = usePathname()
+
+  // Автоматически определяем currentApp на основе pathname, если не передан явно
+  let currentApp = propCurrentApp || 'datalab'
+  if (pathname.startsWith('/app/datalab')) {
+    currentApp = 'datalab'
+  } else if (pathname.startsWith('/app/ai-classifier')) {
+    currentApp = 'ai-classifier'
+  }
 
   // Извлекаем projectId и versionId из пути
   const pathSegments = pathname.split('/')
@@ -32,7 +40,7 @@ export function UniverseLayout({
   return (
     <div className="min-h-screen bg-body-gradient">
       <GlobalHeader currentApp={currentApp} />
-      <Sidebar projectId={projectId} versionId={versionId} />
+      <Sidebar projectId={projectId} versionId={versionId} currentApp={currentApp} />
       <main className="ml-64 pt-16 min-h-screen">
         {children}
       </main>

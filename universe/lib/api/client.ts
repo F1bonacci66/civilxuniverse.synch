@@ -5,10 +5,8 @@ import { getAuthHeaders, getAuthToken, redirectToAuth, removeAuthToken } from '.
 
 // Используем относительный путь для API на том же домене (civilxuniverse.ru)
 // Это решает проблемы с CORS и не требует отдельного домена для API
-const defaultApiUrl =
-  process.env.NODE_ENV === 'development'
-    ? 'http://localhost:8000/api/datalab'
-    : '/api/datalab'
+// В development режиме на сервере также используем относительный путь через nginx
+const defaultApiUrl = '/api/datalab'
 
 const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || defaultApiUrl
 const API_BASE_URL = rawApiUrl.startsWith('http') ? rawApiUrl : '/api/datalab'
@@ -28,21 +26,41 @@ export function getApiClient() {
 export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
-  timeoutMs = 30000
+  timeoutMs = 120000 // Увеличено до 120 секунд по умолчанию для медленных запросов к удаленной БД
 ): Promise<T> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   // Получаем заголовки с токеном
-  const headers = {
+  const headers: HeadersInit = {
     ...getAuthHeaders(),
     ...options.headers,
+  }
+  
+  // Устанавливаем Content-Type для JSON, если не указан и есть body
+  if (options.body && typeof options.body === 'string' && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json'
   }
 
   try {
     // Убираем trailing slash из endpoint, если он есть (Next.js может добавлять его из-за trailingSlash: true)
+    // Также убираем trailing slash из API_BASE_URL для гарантии
+    const cleanBaseUrl = API_BASE_URL.replace(/\/$/, '')
     const cleanEndpoint = endpoint.replace(/\/$/, '')
-    const response = await fetch(`${API_BASE_URL}${cleanEndpoint}`, {
+    const url = `${cleanBaseUrl}${cleanEndpoint}`
+    
+    // Логируем DELETE запросы для отладки
+    if (options.method === 'DELETE') {
+      console.log('[API Client] DELETE запрос:', {
+        endpoint,
+        cleanEndpoint,
+        url,
+        method: options.method,
+        hasHeaders: !!headers,
+      })
+    }
+    
+    const response = await fetch(url, {
       ...options,
       headers,
       signal: controller.signal,
@@ -101,7 +119,25 @@ export async function apiRequest<T>(
       let errorMessage = `Ошибка: ${response.statusText}`
       try {
         const errorData = JSON.parse(errorText)
-        errorMessage = errorData.detail || errorData.message || errorMessage
+        // FastAPI может возвращать detail как строку или массив объектов
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            // Если это массив ошибок валидации, форматируем их
+            errorMessage = errorData.detail
+              .map((err: any) => {
+                if (typeof err === 'string') return err
+                if (err.msg) return `${err.loc?.join('.') || ''}: ${err.msg}`
+                return JSON.stringify(err)
+              })
+              .join(', ')
+          } else if (typeof errorData.detail === 'string') {
+            errorMessage = errorData.detail
+          } else {
+            errorMessage = JSON.stringify(errorData.detail)
+          }
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        }
       } catch {
         errorMessage = errorText || errorMessage
       }
@@ -142,8 +178,91 @@ export async function apiRequest<T>(
 
 /**
  * GET запрос
+ * @param endpoint - API endpoint
+ * @param timeoutMs - Таймаут в миллисекундах
+ * @param signal - AbortSignal для отмены запроса (опционально)
  */
-export async function apiGet<T>(endpoint: string, timeoutMs = 30000): Promise<T> {
+export async function apiGet<T>(endpoint: string, timeoutMs = 120000, signal?: AbortSignal): Promise<T> {
+  // Если передан signal, используем его, но также добавляем таймаут через AbortController
+  // Это гарантирует, что запрос не будет висеть бесконечно
+  if (signal) {
+    // Проверяем, не отменен ли уже запрос
+    if (signal.aborted) {
+      throw new Error('Запрос был отменен')
+    }
+    
+    // Создаем AbortController для таймаута
+    const timeoutController = new AbortController()
+    const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs)
+    
+    // Создаем комбинированный signal, который отменяется при отмене любого из сигналов
+    const combinedController = new AbortController()
+    
+    // Обработчик для внешнего signal
+    const onSignalAbort = () => {
+      combinedController.abort()
+      clearTimeout(timeoutId)
+    }
+    
+    // Обработчик для таймаута
+    const onTimeoutAbort = () => {
+      combinedController.abort()
+      signal.removeEventListener('abort', onSignalAbort)
+    }
+    
+    signal.addEventListener('abort', onSignalAbort, { once: true })
+    timeoutController.signal.addEventListener('abort', onTimeoutAbort, { once: true })
+    
+    const headers = {
+      ...getAuthHeaders(),
+    }
+    
+    const cleanBaseUrl = API_BASE_URL.replace(/\/$/, '')
+    const cleanEndpoint = endpoint.replace(/\/$/, '')
+    const url = `${cleanBaseUrl}${cleanEndpoint}`
+    
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+        signal: combinedController.signal,
+      })
+      
+      clearTimeout(timeoutId)
+      signal.removeEventListener('abort', onSignalAbort)
+      
+      // Обработка ответа (аналогично apiRequest)
+      if (response.status === 401) {
+        removeAuthToken()
+        redirectToAuth()
+        const redirectError = new Error('Требуется авторизация')
+        ;(redirectError as any).isAuthRedirect = true
+        throw redirectError
+      }
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const text = await response.text()
+      
+      try {
+        return JSON.parse(text) as T
+      } catch (error) {
+        console.warn('Failed to parse JSON response:', error, 'Response text:', text.substring(0, 100))
+        return null as T
+      }
+    } catch (error: any) {
+      clearTimeout(timeoutId)
+      signal.removeEventListener('abort', onSignalAbort)
+      if (error.name === 'AbortError' && timeoutController.signal.aborted) {
+        throw new Error(`Запрос превысил таймаут (${timeoutMs}ms)`)
+      }
+      throw error
+    }
+  }
+  
+  // Если signal не передан, используем стандартный apiRequest
   return apiRequest<T>(endpoint, { method: 'GET' }, timeoutMs)
 }
 
@@ -153,7 +272,7 @@ export async function apiGet<T>(endpoint: string, timeoutMs = 30000): Promise<T>
 export async function apiPost<T>(
   endpoint: string,
   data?: any,
-  timeoutMs = 30000
+  timeoutMs = 120000 // Увеличено до 120 секунд по умолчанию
 ): Promise<T> {
   return apiRequest<T>(
     endpoint,
@@ -171,7 +290,7 @@ export async function apiPost<T>(
 export async function apiPut<T>(
   endpoint: string,
   data?: any,
-  timeoutMs = 30000
+  timeoutMs = 120000 // Увеличено до 120 секунд по умолчанию
 ): Promise<T> {
   return apiRequest<T>(
     endpoint,
@@ -186,7 +305,7 @@ export async function apiPut<T>(
 /**
  * DELETE запрос
  */
-export async function apiDelete<T>(endpoint: string, timeoutMs = 30000): Promise<T> {
+export async function apiDelete<T>(endpoint: string, timeoutMs = 120000): Promise<T> {
   return apiRequest<T>(endpoint, { method: 'DELETE' }, timeoutMs)
 }
 
@@ -211,8 +330,11 @@ export async function apiPostFormData<T>(
 
   try {
     // Убираем trailing slash из endpoint, если он есть (Next.js может добавлять его из-за trailingSlash: true)
+    // Также убираем trailing slash из API_BASE_URL для гарантии
+    const cleanBaseUrl = API_BASE_URL.replace(/\/$/, '')
     const cleanEndpoint = endpoint.replace(/\/$/, '')
-    const response = await fetch(`${API_BASE_URL}${cleanEndpoint}`, {
+    const url = `${cleanBaseUrl}${cleanEndpoint}`
+    const response = await fetch(url, {
       method: 'POST',
       headers,
       body: formData,
@@ -272,7 +394,25 @@ export async function apiPostFormData<T>(
       let errorMessage = `Ошибка: ${response.statusText}`
       try {
         const errorData = JSON.parse(errorText)
-        errorMessage = errorData.detail || errorData.message || errorMessage
+        // FastAPI может возвращать detail как строку или массив объектов
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            // Если это массив ошибок валидации, форматируем их
+            errorMessage = errorData.detail
+              .map((err: any) => {
+                if (typeof err === 'string') return err
+                if (err.msg) return `${err.loc?.join('.') || ''}: ${err.msg}`
+                return JSON.stringify(err)
+              })
+              .join(', ')
+          } else if (typeof errorData.detail === 'string') {
+            errorMessage = errorData.detail
+          } else {
+            errorMessage = JSON.stringify(errorData.detail)
+          }
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        }
       } catch {
         errorMessage = errorText || errorMessage
       }

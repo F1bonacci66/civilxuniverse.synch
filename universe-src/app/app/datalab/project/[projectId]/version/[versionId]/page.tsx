@@ -5,13 +5,17 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { Button } from '@/components/ui/button'
 import { Database, BarChart3, FileBarChart, CheckSquare, Upload, Loader2 } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { getProject, getProjectVersion, type Project, type ProjectVersion } from '@/lib/api/projects'
+import { getFileUploads } from '@/lib/api/upload'
+import type { FileUpload } from '@/lib/types/upload'
 
 export default function VersionPage({
   params,
 }: {
   params: { projectId: string; versionId: string }
 }) {
+  const router = useRouter()
   const [project, setProject] = useState<Project | null>(null)
   const [version, setVersion] = useState<ProjectVersion | null>(null)
   const [loading, setLoading] = useState(true)
@@ -94,12 +98,14 @@ export default function VersionPage({
 
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-white">Данные версии</h2>
-          <Link href="/app/datalab/upload">
-            <Button>
-              <Upload className="w-4 h-4 mr-2" />
-              Загрузить файл
-            </Button>
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/app/datalab/upload">
+              <Button>
+                <Upload className="w-4 h-4 mr-2" />
+                Загрузить файл
+              </Button>
+            </Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

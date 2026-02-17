@@ -124,23 +124,17 @@ async function proxyRequest(request: NextRequest, { params }: RouteParams) {
     if (segmentedPath === 'conversion/queue/status') {
       timeoutMs = 60000
     }
-    // Для viewer endpoints увеличиваем таймаут до 180 секунд (загрузка больших XKT файлов и metadata может занимать много времени)
-    else if (segmentedPath.startsWith('viewer/')) {
-      // Для XKT файлов нужен больший таймаут
-      if (segmentedPath.endsWith('/xkt')) {
-        timeoutMs = 180000 // 180 секунд для больших XKT файлов
-      } else {
-        timeoutMs = 120000 // 120 секунд для остальных viewer endpoints (status, metadata, groups)
-      }
-    }
     // Для pivot/fields увеличиваем таймаут до 600 секунд (загрузка полей может занимать очень много времени на больших данных)
     else if (segmentedPath === 'pivot/fields' || segmentedPath.startsWith('pivot/fields/')) {
       timeoutMs = 600000 // 600 секунд (10 минут) для загрузки полей
     }
+    // Для pivot endpoints увеличиваем таймаут до 3600 секунд (1 час) для построения больших сводных таблиц
+    // ВАЖНО: Эти запросы должны идти напрямую через nginx, но на всякий случай увеличиваем таймаут здесь тоже
+    else if (segmentedPath.startsWith('pivot/') || segmentedPath === 'pivot') {
+      timeoutMs = 3600000 // 3600 секунд (1 час) для построения больших сводных таблиц
+    }
     // Для остальных медленных endpoints увеличиваем таймаут до 120 секунд (запросы могут быть медленными на больших данных)
-    else if (segmentedPath.startsWith('pivot/') || 
-             segmentedPath === 'pivot' ||
-             segmentedPath === 'data' ||
+    else if (segmentedPath === 'data' ||
              segmentedPath.startsWith('data/') ||
              segmentedPath.startsWith('conversion/project/') ||
              segmentedPath === 'projects' ||

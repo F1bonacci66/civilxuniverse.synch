@@ -6,6 +6,21 @@ const nextConfig = {
     unoptimized: true,
   },
   trailingSlash: true,
+  // Keep trailingSlash-enabled builds, but do not auto-redirect with 308.
+  // We handle special cases (e.g. legacy /app/viewer) via middleware.
+  skipTrailingSlashRedirect: true,
+  // Отключаем кэширование для всех режимов на dev сервере
+  onDemandEntries: {
+    maxInactiveAge: 25 * 1000,
+    pagesBufferLength: 2,
+  },
+  // Отключаем кэширование RSC запросов
+  experimental: {
+    staleTimes: {
+      dynamic: 0,
+      static: 0,
+    },
+  },
   // Rewrite отключен - API запросы обрабатываются напрямую через Nginx
   // Если NEXT_PUBLIC_API_URL - относительный путь (/api/datalab), запросы идут через Nginx
   // Если NEXT_PUBLIC_API_URL - полный URL, запросы идут напрямую к API
@@ -14,6 +29,45 @@ const nextConfig = {
     // Route handler находится в app/api/datalab/[...path]/route.ts
     // Это работает и в development, и в production
     return []
+  },
+  // Webpack конфигурация для работы с @xeokit/xeokit-sdk
+  webpack: (config, { isServer }) => {
+    // Исключаем Node.js модули из клиентского бандла
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        crypto: false,
+        stream: false,
+        buffer: false,
+        util: false,
+        assert: false,
+        http: false,
+        https: false,
+        os: false,
+        url: false,
+        zlib: false,
+        net: false,
+        tls: false,
+        child_process: false,
+      }
+      // Игнорируем предупреждения о Node.js модулях
+      config.ignoreWarnings = [
+        { module: /node_modules\/@xeokit\/xeokit-sdk/ },
+        /Module not found: Error: Can't resolve 'fs'/,
+        /Module not found: Error: Can't resolve 'path'/,
+      ]
+      // Внешние зависимости для @xeokit/xeokit-sdk
+      config.externals = config.externals || []
+      if (Array.isArray(config.externals)) {
+        config.externals.push({
+          'fs': 'commonjs fs',
+          'path': 'commonjs path',
+        })
+      }
+    }
+    return config
   },
 }
 

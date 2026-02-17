@@ -32,9 +32,18 @@ export async function apiRequest<T>(
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
 
   // Получаем заголовки с токеном
-  const headers = {
-    ...getAuthHeaders(),
-    ...options.headers,
+  // getAuthHeaders() возвращает обычный объект { 'Content-Type': '...', 'Authorization': '...' }
+  const authHeaders = getAuthHeaders() as Record<string, string>
+  
+  // Объединяем заголовки
+  const headers: HeadersInit = {
+    ...authHeaders,
+    ...(options.headers as Record<string, string> || {}),
+  }
+  
+  // Устанавливаем Content-Type для JSON, если не указан и есть body
+  if (options.body && typeof options.body === 'string' && !(headers as Record<string, string>)['Content-Type']) {
+    (headers as Record<string, string>)['Content-Type'] = 'application/json'
   }
 
   try {
@@ -114,11 +123,39 @@ export async function apiRequest<T>(
       let errorMessage = `Ошибка: ${response.statusText}`
       try {
         const errorData = JSON.parse(errorText)
-        errorMessage = errorData.detail || errorData.message || errorMessage
+        // FastAPI может возвращать detail как строку или массив объектов
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            // Если это массив ошибок валидации, форматируем их
+            errorMessage = errorData.detail
+              .map((err: any) => {
+                if (typeof err === 'string') return err
+                if (err.msg) return `${err.loc?.join('.') || ''}: ${err.msg}`
+                return JSON.stringify(err)
+              })
+              .join(', ')
+          } else if (typeof errorData.detail === 'string') {
+            errorMessage = errorData.detail
+          } else {
+            errorMessage = JSON.stringify(errorData.detail)
+          }
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        }
       } catch {
         errorMessage = errorText || errorMessage
       }
-      throw new Error(errorMessage)
+      // Логируем детали ошибки для отладки
+      console.error('[API Client] Error response:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorText,
+        errorMessage
+      })
+      const error = new Error(errorMessage)
+      ;(error as any).details = errorText
+      ;(error as any).status = response.status
+      throw error
     }
 
     // Читаем тело ответа один раз
@@ -371,11 +408,39 @@ export async function apiPostFormData<T>(
       let errorMessage = `Ошибка: ${response.statusText}`
       try {
         const errorData = JSON.parse(errorText)
-        errorMessage = errorData.detail || errorData.message || errorMessage
+        // FastAPI может возвращать detail как строку или массив объектов
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            // Если это массив ошибок валидации, форматируем их
+            errorMessage = errorData.detail
+              .map((err: any) => {
+                if (typeof err === 'string') return err
+                if (err.msg) return `${err.loc?.join('.') || ''}: ${err.msg}`
+                return JSON.stringify(err)
+              })
+              .join(', ')
+          } else if (typeof errorData.detail === 'string') {
+            errorMessage = errorData.detail
+          } else {
+            errorMessage = JSON.stringify(errorData.detail)
+          }
+        } else if (errorData.message) {
+          errorMessage = errorData.message
+        }
       } catch {
         errorMessage = errorText || errorMessage
       }
-      throw new Error(errorMessage)
+      // Логируем детали ошибки для отладки
+      console.error('[API Client] Error response:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorText,
+        errorMessage
+      })
+      const error = new Error(errorMessage)
+      ;(error as any).details = errorText
+      ;(error as any).status = response.status
+      throw error
     }
 
     // Читаем тело ответа один раз
